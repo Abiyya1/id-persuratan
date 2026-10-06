@@ -1,25 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBrowserClient } from '@/lib/supabase-client';
 import { DocumentsTab } from './DocumentsTab';
-import { UsersTab } from './UsersTab';
-import { AuditTab } from './AuditTab';
 import type { DocumentRow, SyncStatus } from '@/lib/supabase';
 
-interface CurrentUser {
-  id: string;
-  username: string;
-  role: string;
-}
-
-type Tab = 'documents' | 'users' | 'audit';
-
 /**
- * Dashboard 2 shell: tab routing, the Realtime subscription, and the queue
- * badge.
+ * Dashboard 2 documents panel: the Realtime subscription, the sync-queue badge,
+ * export, and manual resync.
  *
  * Realtime design note: the anon key has SELECT on `documents` (see
  * schema.sql), so the socket receives row-level changes without any
@@ -28,14 +16,7 @@ type Tab = 'documents' | 'users' | 'audit';
  * mutation still goes through a service-role API route; the anon key cannot
  * write.
  */
-function AdminPortalInner({ currentUser }: { currentUser: CurrentUser }) {
-  const searchParams = useSearchParams();
-  const isSuperadmin = currentUser.role === 'superadmin';
-
-  // ?tab=users is what the nav bar links to for superadmin.
-  const initialTab: Tab = searchParams.get('tab') === 'users' && isSuperadmin ? 'users' : 'documents';
-  const [tab, setTab] = useState<Tab>(initialTab);
-
+function AdminPortalInner() {
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(25);
@@ -238,15 +219,6 @@ function AdminPortalInner({ currentUser }: { currentUser: CurrentUser }) {
     }
   }
 
-  const tabs = useMemo(() => {
-    const list: Array<{ key: Tab; label: string }> = [
-      { key: 'documents', label: 'Documents' },
-    ];
-    if (isSuperadmin) list.push({ key: 'users', label: 'User Management' });
-    list.push({ key: 'audit', label: 'Audit Log' });
-    return list;
-  }, [isSuperadmin]);
-
   return (
     <div className="space-y-6">
       {toast && (
@@ -270,67 +242,37 @@ function AdminPortalInner({ currentUser }: { currentUser: CurrentUser }) {
         </div>
       )}
 
-      {/* ---- Tabs --------------------------------------------------------- */}
-      <div className="border-b border-slate-200">
-        <nav className="-mb-px flex gap-1" aria-label="Management sections">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-                tab === t.key
-                  ? 'border-navy-700 text-navy-800'
-                  : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
-              }`}
-              aria-current={tab === t.key ? 'page' : undefined}
-            >
-              {t.label}
-            </button>
-          ))}
+      {/* ---- Toolbar --------------------------------------------------- */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={`badge ${live ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}
+          title={
+            live
+              ? 'Connected to Supabase Realtime'
+              : 'Realtime not connected -- use Refresh to update manually'
+          }
+        >
+          <span
+            aria-hidden
+            className={`mr-1.5 h-1.5 w-1.5 rounded-full ${live ? 'bg-emerald-500' : 'bg-slate-400'}`}
+          />
+          {live ? 'Live' : 'Offline'}
+        </span>
 
-          <div className="ml-auto flex items-center gap-2 pb-1.5">
-            <span
-              className={`badge ${live ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}
-              title={
-                live
-                  ? 'Connected to Supabase Realtime'
-                  : 'Realtime not connected -- use Refresh to update manually'
-              }
-            >
-              <span
-                aria-hidden
-                className={`mr-1.5 h-1.5 w-1.5 rounded-full ${live ? 'bg-emerald-500' : 'bg-slate-400'}`}
-              />
-              {live ? 'Live' : 'Offline'}
-            </span>
-
-            <button
-              type="button"
-              onClick={() => void loadDocuments()}
-              className="btn-secondary btn-sm"
-            >
-              Refresh
-            </button>
-
-            <button
-              type="button"
-              onClick={() => void handleExport()}
-              className="btn-secondary btn-sm"
-            >
-              Export CSV
-            </button>
-
-            <button
-              type="button"
-              onClick={() => void handleResyncAll()}
-              disabled={resyncing}
-              className="btn-primary btn-sm"
-            >
-              {resyncing ? 'Re-syncing...' : 'Re-sync all'}
-            </button>
-          </div>
-        </nav>
+        <button type="button" onClick={() => void loadDocuments()} className="btn-secondary btn-sm">
+          Refresh
+        </button>
+        <button type="button" onClick={() => void handleExport()} className="btn-secondary btn-sm">
+          Export CSV
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleResyncAll()}
+          disabled={resyncing}
+          className="btn-primary btn-sm"
+        >
+          {resyncing ? 'Re-syncing...' : 'Re-sync all'}
+        </button>
       </div>
 
       {/* ---- Queue banner -------------------------------------------------- */}
@@ -353,38 +295,32 @@ function AdminPortalInner({ currentUser }: { currentUser: CurrentUser }) {
         </div>
       )}
 
-      {/* ---- Panels --------------------------------------------------------- */}
-      {tab === 'documents' && (
-        <DocumentsTab
-          documents={documents}
-          loading={loading}
-          search={search}
-          setSearch={setSearch}
-          statusFilter={statusFilter}
-          setStatusFilter={setStatusFilter}
-          page={page}
-          setPage={setPage}
-          totalPages={totalPages}
-          total={total}
-          onResyncOne={handleResyncOne}
-        />
-      )}
-
-      {tab === 'users' && isSuperadmin && (
-        <UsersTab currentUserId={currentUser.id} onToast={setToast} />
-      )}
-
-      {tab === 'audit' && <AuditTab />}
+      {/* ---- Panel --------------------------------------------------------- */}
+      <DocumentsTab
+        documents={documents}
+        loading={loading}
+        search={search}
+        setSearch={setSearch}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        page={page}
+        setPage={setPage}
+        totalPages={totalPages}
+        total={total}
+        onResyncOne={handleResyncOne}
+      />
     </div>
   );
 }
 
-export function AdminPortal({ currentUser }: { currentUser: CurrentUser }) {
-  return (
-    <Suspense fallback={<p className="text-sm text-slate-500">Loading management portal...</p>}>
-      <AdminPortalInner currentUser={currentUser} />
-    </Suspense>
-  );
+/**
+ * Documents section of the Management Portal.
+ *
+ * Takes no props: every capability it offers (documents, sync status, export,
+ * resync) is admin-gated by the route layout, and the Realtime subscription
+ * needs no user context. Role checks live in ../app/(portal)/admin/layout.tsx
+ * and ./users/page.tsx.
+ */
+export function AdminPortal() {
+  return <AdminPortalInner />;
 }
-
-export type { CurrentUser };
