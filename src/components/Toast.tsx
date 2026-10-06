@@ -3,25 +3,23 @@
 /**
  * Transient status banner for operation results.
  *
- * Extracted because AdminPortal and UsersTab both render the identical block;
- * duplicated markup drifts. UsersTab additionally needs a `className` so its
- * toast can carry bottom margin inside the page stack.
+ * Extracted because AdminPortal and UsersTab both rendered the identical
+ * block; duplicated markup drifts. Both callers wrap their content in a
+ * `space-y-*` stack, which already provides the gap this needs.
  */
 export function Toast({
   toast,
   onDismiss,
-  className = '',
 }: {
-  toast: { kind: 'success' | 'error'; text: string } | null;
+  toast: ToastState;
   onDismiss: () => void;
-  className?: string;
 }) {
   if (!toast) return null;
 
   return (
     <div
       role="status"
-      className={`flex items-start justify-between rounded-md border p-3 text-sm ${className} ${
+      className={`flex items-start justify-between rounded-md border p-3 text-sm ${
         toast.kind === 'success'
           ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
           : 'border-red-300 bg-red-50 text-red-800'
