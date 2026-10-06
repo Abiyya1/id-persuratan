@@ -2,7 +2,7 @@ import { getSupabaseAdmin, type AuditLogRow } from '@/lib/supabase';
 import { requireAdmin, handleRoute } from '@/lib/auth';
 
 /**
- * Paginated audit log for Dashboard 2's Audit Log tab.
+ * Paginated audit log for the Audit Log page at /admin/audit.
  *
  * Admin-only: the log contains usernames and internal actions.
  */

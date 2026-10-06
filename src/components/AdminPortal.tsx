@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBrowserClient } from '@/lib/supabase-client';
 import { DocumentsTab } from './DocumentsTab';
+import { Toast, type ToastState } from './Toast';
 import type { DocumentRow, SyncStatus } from '@/lib/supabase';
 
 /**
@@ -34,7 +35,7 @@ export function AdminPortal() {
 
   const [queue, setQueue] = useState({ failed: 0, pending: 0 });
   const [live, setLive] = useState(false);
-  const [toast, setToast] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const [toast, setToast] = useState<ToastState>(null);
 
   // Guards against a stale in-flight fetch overwriting a newer one.
   const requestId = useRef(0);
@@ -226,26 +227,7 @@ export function AdminPortal() {
 
   return (
     <div className="space-y-6">
-      {toast && (
-        <div
-          role="status"
-          className={`flex items-start justify-between rounded-md border p-3 text-sm ${
-            toast.kind === 'success'
-              ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
-              : 'border-red-300 bg-red-50 text-red-800'
-          }`}
-        >
-          <span>{toast.text}</span>
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            className="ml-3 font-bold opacity-60 hover:opacity-100"
-            aria-label="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
 
       {/* ---- Toolbar --------------------------------------------------- */}
       <div className="flex flex-wrap items-center gap-2">

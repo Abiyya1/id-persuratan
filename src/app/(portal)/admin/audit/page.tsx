@@ -1,12 +1,13 @@
-import { redirect } from 'next/navigation';
-import { getFreshSession } from '@/lib/auth';
 import { AuditTab } from '@/components/AuditTab';
 
-/** Audit Log. Admin and superadmin both get this; the API enforces it too. */
-export default async function AdminAuditPage() {
-  const user = await getFreshSession();
-  if (!user) redirect('/login');
-
+/**
+ * Audit Log. Admin and superadmin both get this; the API enforces it too.
+ *
+ * Purely presentational: (portal)/layout.tsx redirects an unauthenticated
+ * visitor and ./layout.tsx gates the role, so there is nothing for this page
+ * to check and nothing it needs from the session.
+ */
+export default function AdminAuditPage() {
   return (
     <>
       <div className="mb-6">

@@ -78,8 +78,10 @@ export function AppShell({
       // just left and the user briefly sees a page they no longer can reach.
       router.refresh();
     } catch {
-      // The cookie may already be gone even if the response failed. Sending
-      // them to /login and letting middleware re-check beats a dead button.
+      // Network-level failure only -- fetch resolves on a 4xx/5xx, so an HTTP
+      // error already took the try path above. Either way the goal is the same:
+      // land them on /login and let middleware decide whether the cookie is
+      // really gone, rather than leaving a button that appears broken.
       router.push('/login');
     } finally {
       setSigningOut(false);
@@ -134,6 +136,7 @@ export function AppShell({
             href="/profile"
             title="Profile"
             aria-label="Profile"
+            aria-current={pathname.startsWith('/profile') ? 'page' : undefined}
             className={`rounded-md p-2 transition-colors ${
               pathname.startsWith('/profile')
                 ? 'bg-slate-100 text-navy-800'
@@ -152,9 +155,7 @@ export function AppShell({
             type="button"
             onClick={() => void signOut()}
             disabled={signingOut}
-            className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white
-                       transition-colors hover:bg-red-700 disabled:cursor-not-allowed
-                       disabled:opacity-50"
+            className="btn-danger"
           >
             {signingOut ? 'Signing out...' : 'Sign out'}
           </button>

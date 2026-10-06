@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getFreshSession } from '@/lib/auth';
-import { UsersSection } from '@/components/UsersSection';
+import { UsersTab } from '@/components/UsersTab';
 
 /**
  * User Management -- superadmin only.
@@ -8,10 +8,15 @@ import { UsersSection } from '@/components/UsersSection';
  * The role is re-checked because the URL is typeable. /api/superadmin/users
  * refuses independently too, but failing here gives a clean redirect instead
  * of an empty panel.
+ *
+ * The session is read for the current user's id, so the table can hide its own
+ * row's destructive controls.
  */
 export default async function AdminUsersPage() {
   const user = await getFreshSession();
 
+  // The null check is redundant with (portal)/layout.tsx at runtime, but
+  // TypeScript cannot see across the layout boundary, so it is required.
   if (!user) redirect('/login');
   if (user.role !== 'superadmin') redirect('/admin');
 
@@ -24,7 +29,7 @@ export default async function AdminUsersPage() {
         </p>
       </div>
 
-      <UsersSection currentUserId={user.id} />
+      <UsersTab currentUserId={user.id} />
     </>
   );
 }

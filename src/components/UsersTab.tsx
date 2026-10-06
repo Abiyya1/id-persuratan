@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { RoleBadge, StatusBadge } from './Badges';
+import { Toast, type ToastState } from './Toast';
 import type { PublicUser, Role } from '@/lib/supabase';
 
 /**
@@ -13,14 +13,12 @@ import type { PublicUser, Role } from '@/lib/supabase';
  * demote yourself / cannot remove the last superadmin" guards), so a stale UI
  * can never escalate privileges.
  */
-export function UsersTab({
-  currentUserId,
-  onToast,
-}: {
-  currentUserId: string;
-  onToast: (t: { kind: 'success' | 'error'; text: string }) => void;
-}) {
-  const router = useRouter();
+export function UsersTab({ currentUserId }: { currentUserId: string }) {
+  // Owns its own toast rather than reporting through a prop: the component that
+  // emits the messages is the one that should render them. Callers that also
+  // want a toast (the documents panel) keep their own.
+  const [toast, setToast] = useState<ToastState>(null);
+  const onToast = setToast;
 
   const [users, setUsers] = useState<PublicUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +73,6 @@ export function UsersTab({
 
       onToast({ kind: 'success', text: data.message ?? 'Updated.' });
       await load();
-      router.refresh();
     } catch {
       onToast({ kind: 'error', text: 'Could not reach the server.' });
     } finally {
@@ -119,6 +116,8 @@ export function UsersTab({
 
   return (
     <div className="space-y-4">
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
+
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <label htmlFor="user-filter" className="label">

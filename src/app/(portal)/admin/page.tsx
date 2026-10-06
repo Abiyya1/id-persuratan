@@ -1,17 +1,13 @@
-import { redirect } from 'next/navigation';
-import { getFreshSession } from '@/lib/auth';
 import { AdminPortal } from '@/components/AdminPortal';
 
 /**
  * Management Portal -- Documents section.
  *
- * Shell is in ../../(portal)/layout.tsx, role gate in ./layout.tsx.
- * AdminPortal no longer takes a `tab` prop; it is only rendered here.
+ * Shell is in ../../(portal)/layout.tsx, role gate in ./layout.tsx. Both
+ * already redirect when the session is missing, so this page does not re-check:
+ * AdminPortal takes no user context.
  */
-export default async function AdminDocumentsPage() {
-  const user = await getFreshSession();
-  if (!user) redirect('/login');
-
+export default function AdminDocumentsPage() {
   return (
     <>
       <div className="mb-6">
