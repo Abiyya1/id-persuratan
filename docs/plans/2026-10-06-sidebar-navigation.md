@@ -783,9 +783,15 @@ The sidebar replaced it for every role, so it is now dead code.
 
 ```bash
 grep -rn "AppNav" src/
+grep -rn "import.*AppNav\|<AppNav" src/
 ```
 
-Expected: no matches. **If any remain, fix those files first** -- Task 3 removes the last two usages.
+Expected: **zero importers or callers** from the second grep. **If any remain,
+fix those files first** -- Task 3 removes the last two usages.
+
+The first grep may still match comment-only mentions (a rationale comment in
+AppShell, one in middleware). Those are fine and are not a blocker -- the real
+gate is that nothing imports or renders `<AppNav`.
 
 **Step 2: Delete it**
 
@@ -1000,7 +1006,7 @@ git commit -m "docs: document sidebar navigation layout"
 - [ ] `npm run lint` clean (`--max-warnings=0`)
 - [ ] `npm run build` succeeds
 - [ ] `src/components/AppNav.tsx` no longer exists
-- [ ] `grep -rn "AppNav" src/` returns nothing
+- [ ] `grep -rn "AppNav" src/` returns no importers or callers (comment-only mentions are fine)
 - [ ] Exactly one `<aside>` on every authenticated page
 - [ ] superadmin sidebar: Documents, User Management, Audit Log -- in that order
 - [ ] plain `user` sidebar: My Documents only

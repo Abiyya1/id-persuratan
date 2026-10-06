@@ -121,8 +121,8 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', req.url));
   }
 
-  // Mirror image: admins and superadmins have no "My Documents" nav link (see
-  // AppNav), so landing on /dashboard is a dead end. Point them at Management.
+  // Mirror image: admins and superadmins have no "My Documents" nav entry, so
+  // landing on /dashboard is a dead end. Point them at Management.
   if (isAdmin && (pathname === '/dashboard' || pathname.startsWith('/dashboard/'))) {
     return NextResponse.redirect(new URL('/admin', req.url));
   }

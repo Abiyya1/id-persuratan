@@ -67,8 +67,8 @@ export function AppShell({
 
   const items = NAV_ITEMS.filter((item) => item.roles.includes(user.role));
 
-  // Inlined rather than extracted to a hook: AppNav is being deleted, so this
-  // has exactly one consumer and a shared abstraction would be pure indirection.
+  // Inlined rather than extracted to a hook: this is the only sign-out in the
+  // app, so a shared abstraction would be pure indirection.
   const signOut = useCallback(async () => {
     setSigningOut(true);
     try {
