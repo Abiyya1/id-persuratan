@@ -220,6 +220,43 @@ The superadmin API refuses, with a 409 or 400:
 - deleting your own account
 - demoting or deleting the **last** active superadmin
 
+### Navigation
+
+Every authenticated role uses a fixed left sidebar. There is no top navigation
+bar.
+
+| Role | Sidebar entries |
+|---|---|
+| `user` | My Documents (`/dashboard`) |
+| `admin` | Documents (`/admin`), Audit Log (`/admin/audit`) |
+| `superadmin` | Documents, User Management (`/admin/users`), Audit Log |
+
+The identity row sits at the top right of the content area, not in the sidebar:
+a user icon linking to `/profile`, then the username with the role beneath it,
+then a red Sign out button. The row is `sticky`, so it stays reachable on long
+tables without scrolling.
+
+Management sections are **real routes**, not tabs. A refresh or browser-back
+keeps you where you were — the previous implementation read `?tab=` once at mount
+and silently fell back to Documents on reload. Active state is derived from
+`usePathname`, so it is correct on first paint, on refresh, and on back/forward.
+
+All authenticated pages live in the `(portal)` route group, which owns the single
+session check and the single shell render. Route groups do not appear in URLs,
+so `/dashboard` is still `/dashboard`.
+
+Access is gated at three independent layers:
+
+1. **Nav** — `AppShell` filters entries by the user's role.
+2. **Route** — `(portal)/admin/layout.tsx` re-reads the database and rejects
+   non-admins; `(portal)/admin/users/page.tsx` rejects non-superadmins.
+3. **API** — each `/api/superadmin/users` handler calls `requireSuperadmin()`
+   independently.
+
+Middleware is only a redirect layer. It reads role claims from an 8-hour JWT, so
+a demotion takes effect at the route layer immediately but in middleware only
+after the token expires.
+
 ---
 
 ## The first Superadmin
@@ -414,19 +451,37 @@ comparison, method guards, and input validation.
 asserts every returned ID is unique. It consumes real IDs from your counter and
 cannot be undone, so run it on a throwaway project.
 
+`tsc --noEmit`, `eslint --max-warnings=0` and `next build` are all clean.
+
 ## Verification status
 
-`tsc --noEmit` clean, `eslint --max-warnings=0` clean, `next build` clean, and
-`npm test` + `npm run test:authz` both 100% green against a running server.
+### Sidebar layout — verified in a browser
 
-The following are **not** verified, because they need a real Supabase project
-and a real Google service account — neither existed in the build environment:
+Checked against a live Supabase project with `admin`, `user` and `superadmin`
+accounts. Every assertion below was read from the rendered DOM or computed
+styles, not inferred:
 
-- end-to-end document creation against live Postgres
-- the Google Sheets append (header creation, column layout, rate limits)
-- Supabase Realtime actually delivering row events (the RLS + publication setup)
-- `npm run test:concurrency`
+- exactly one `<aside>` and zero `<header>` elements on every authenticated page
+- nav order per role — superadmin gets Documents / User Management / Audit Log,
+  admin loses User Management, `user` gets only My Documents
+- identity row order is user icon, then username with role beneath, then button
+- the Sign out button computes to `rgb(220, 38, 38)`
+- sidebar is 256px wide; the identity row is `position: sticky`
+- a **hard refresh** on `/admin/audit` stays on Audit Log, and only that nav item
+  gets `aria-current="page"`
+- typing `/admin/users` as `admin` redirects to `/admin`; typing any `/admin*`
+  URL as `user` redirects to `/dashboard`
+- anonymous requests to all five protected routes render **no** sidebar and land
+  on `/login`
+- the logout API clears the session cookie
+- the documents table renders live rows with working Sync badges, Edit and
+  Re-sync actions, and the Refresh / Export CSV / Re-sync all toolbar
 
-The Realtime claim in particular rests on the SQL being correct, not on
-observed behaviour. Verify it by inserting a document and watching the
-Dashboard 2 badge flip to "Live".
+The following remain **not** verified:
+
+- Supabase Realtime actually delivering row events (the RLS + publication setup).
+  The badge rendered "Offline" during verification, which may be a genuine
+  failure of the publication setup or just the sandbox's network. Confirm by
+  inserting a document and watching for the row to appear without a refresh.
+- `npm run test:concurrency`, which needs a throwaway project
+- the Google Sheets append under real rate limits
