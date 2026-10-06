@@ -17,7 +17,7 @@ export default async function AdminDocumentsPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-navy-900">Management Portal</h1>
         <p className="mt-1 text-sm text-slate-600">
-          All documents, live sync status, and audit history.
+          All documents, live sync status, and manual re-sync.
         </p>
       </div>
 

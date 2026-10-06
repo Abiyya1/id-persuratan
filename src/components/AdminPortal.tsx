@@ -6,8 +6,13 @@ import { DocumentsTab } from './DocumentsTab';
 import type { DocumentRow, SyncStatus } from '@/lib/supabase';
 
 /**
- * Dashboard 2 documents panel: the Realtime subscription, the sync-queue badge,
- * export, and manual resync.
+ * Documents section of the Management Portal: the documents table, the Realtime
+ * subscription, the sync-queue badge, export, and manual resync.
+ *
+ * Takes no props. Every capability it offers is role-gated server-side by
+ * ../app/(portal)/admin/layout.tsx, with the superadmin-only gate for user
+ * management in ../app/(portal)/admin/users/page.tsx -- so nothing here needs
+ * to know who is looking.
  *
  * Realtime design note: the anon key has SELECT on `documents` (see
  * schema.sql), so the socket receives row-level changes without any
@@ -16,7 +21,7 @@ import type { DocumentRow, SyncStatus } from '@/lib/supabase';
  * mutation still goes through a service-role API route; the anon key cannot
  * write.
  */
-function AdminPortalInner() {
+export function AdminPortal() {
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(25);
@@ -311,16 +316,4 @@ function AdminPortalInner() {
       />
     </div>
   );
-}
-
-/**
- * Documents section of the Management Portal.
- *
- * Takes no props: every capability it offers (documents, sync status, export,
- * resync) is admin-gated by the route layout, and the Realtime subscription
- * needs no user context. Role checks live in ../app/(portal)/admin/layout.tsx
- * and ./users/page.tsx.
- */
-export function AdminPortal() {
-  return <AdminPortalInner />;
 }
