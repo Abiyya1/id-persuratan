@@ -1,0 +1,390 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
+import { getBrowserClient } from '@/lib/supabase-client';
+import { DocumentsTab } from './DocumentsTab';
+import { UsersTab } from './UsersTab';
+import { AuditTab } from './AuditTab';
+import type { DocumentRow, SyncStatus } from '@/lib/supabase';
+
+interface CurrentUser {
+  id: string;
+  username: string;
+  role: string;
+}
+
+type Tab = 'documents' | 'users' | 'audit';
+
+/**
+ * Dashboard 2 shell: tab routing, the Realtime subscription, and the queue
+ * badge.
+ *
+ * Realtime design note: the anon key has SELECT on `documents` (see
+ * schema.sql), so the socket receives row-level changes without any
+ * app-level authorization. That is a deliberate trade -- it is what makes
+ * live updates work at all under a custom (non-Supabase-Auth) session. Every
+ * mutation still goes through a service-role API route; the anon key cannot
+ * write.
+ */
+function AdminPortalInner({ currentUser }: { currentUser: CurrentUser }) {
+  const searchParams = useSearchParams();
+  const isSuperadmin = currentUser.role === 'superadmin';
+
+  // ?tab=users is what the nav bar links to for superadmin.
+  const initialTab: Tab = searchParams.get('tab') === 'users' && isSuperadmin ? 'users' : 'documents';
+  const [tab, setTab] = useState<Tab>(initialTab);
+
+  const [documents, setDocuments] = useState<DocumentRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(25);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<SyncStatus | 'all'>('all');
+
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+
+  const [queue, setQueue] = useState({ failed: 0, pending: 0 });
+  const [live, setLive] = useState(false);
+  const [toast, setToast] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+
+  // Guards against a stale in-flight fetch overwriting a newer one.
+  const requestId = useRef(0);
+
+  // Debounce the search box so typing does not fire a query per keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => setPage(1), [debouncedSearch, statusFilter]);
+
+  const loadQueue = useCallback(async () => {
+    try {
+      const res = await fetch('/api/documents/resync');
+      if (res.ok) {
+        const data = await res.json();
+        setQueue({ failed: data.failed ?? 0, pending: data.pending ?? 0 });
+      }
+    } catch {
+      // Non-critical badge; leave the last known value.
+    }
+  }, []);
+
+  const loadDocuments = useCallback(async () => {
+    const id = ++requestId.current;
+    setLoading(true);
+
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+        syncStatus: statusFilter,
+      });
+      if (debouncedSearch) params.set('search', debouncedSearch);
+
+      const res = await fetch(`/api/documents/list?${params.toString()}`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+
+      // A newer request already landed -- discard this response.
+      if (id !== requestId.current) return;
+
+      setDocuments(data.documents ?? []);
+      setTotal(data.pagination?.total ?? 0);
+      setTotalPages(data.pagination?.totalPages ?? 1);
+    } catch {
+      if (id === requestId.current) {
+        setToast({ kind: 'error', text: 'Could not load documents.' });
+      }
+    } finally {
+      if (id === requestId.current) setLoading(false);
+    }
+  }, [page, pageSize, statusFilter, debouncedSearch]);
+
+  useEffect(() => {
+    void loadDocuments();
+  }, [loadDocuments]);
+
+  useEffect(() => {
+    void loadQueue();
+  }, [loadQueue]);
+
+  // ---- Supabase Realtime ---------------------------------------------------
+  useEffect(() => {
+    let channel: ReturnType<ReturnType<typeof getBrowserClient>['channel']> | null = null;
+    let cancelled = false;
+
+    try {
+      const supabase = getBrowserClient();
+
+      channel = supabase
+        .channel('documents-live')
+        .on(
+          // INSERT and UPDATE both, so a fresh row appears without a refresh
+          // and a pending -> synced transition updates in place.
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'documents' },
+          () => {
+            // Refetch rather than patching local state: the server is the
+            // source of truth for filters, pagination and sort order, and
+            // reconciling all three client-side is where bugs live.
+            void loadDocuments();
+            void loadQueue();
+          },
+        )
+        .subscribe((status) => {
+          if (cancelled) return;
+          setLive(status === 'SUBSCRIBED');
+        });
+    } catch {
+      // Missing NEXT_PUBLIC_* vars, or the browser blocked the socket. The
+      // table still works via the manual Refresh button, so this is not fatal.
+      setLive(false);
+    }
+
+    return () => {
+      cancelled = true;
+      if (channel) {
+        // Unsubscribe before removing, otherwise the socket lingers.
+        try {
+          channel.unsubscribe();
+        } catch {
+          // Already torn down.
+        }
+      }
+    };
+  }, [loadDocuments, loadQueue]);
+
+  // ---- Manual resync -------------------------------------------------------
+  const [resyncing, setResyncing] = useState(false);
+
+  async function handleResyncAll() {
+    setResyncing(true);
+    try {
+      const res = await fetch('/api/documents/resync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batch: true }),
+      });
+
+      const data = await res.json();
+
+      setToast({
+        kind: data.summary?.failed > 0 ? 'error' : 'success',
+        text: data.message ?? 'Resync finished.',
+      });
+
+      await Promise.all([loadDocuments(), loadQueue()]);
+    } catch {
+      setToast({ kind: 'error', text: 'Resync failed to reach the server.' });
+    } finally {
+      setResyncing(false);
+    }
+  }
+
+  async function handleResyncOne(id: number) {
+    try {
+      const res = await fetch('/api/documents/resync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+
+      const data = await res.json();
+
+      setToast({
+        kind: data.outcome?.ok ? 'success' : 'error',
+        text: data.message ?? 'Resync attempted.',
+      });
+
+      await Promise.all([loadDocuments(), loadQueue()]);
+    } catch {
+      setToast({ kind: 'error', text: 'Resync failed to reach the server.' });
+    }
+  }
+
+  async function handleExport() {
+    const params = new URLSearchParams({ syncStatus: statusFilter });
+    if (debouncedSearch) params.set('search', debouncedSearch);
+
+    try {
+      const res = await fetch(`/api/documents/export?${params.toString()}`);
+      if (!res.ok) {
+        setToast({ kind: 'error', text: 'Export failed.' });
+        return;
+      }
+
+      const blob = await res.blob();
+
+      // Object URL is revoked immediately after the click handler returns --
+      // otherwise the blob stays in memory for the life of the tab.
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `documents-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setToast({ kind: 'success', text: 'CSV exported.' });
+    } catch {
+      setToast({ kind: 'error', text: 'Export failed.' });
+    }
+  }
+
+  const tabs = useMemo(() => {
+    const list: Array<{ key: Tab; label: string }> = [
+      { key: 'documents', label: 'Documents' },
+    ];
+    if (isSuperadmin) list.push({ key: 'users', label: 'User Management' });
+    list.push({ key: 'audit', label: 'Audit Log' });
+    return list;
+  }, [isSuperadmin]);
+
+  return (
+    <div className="space-y-6">
+      {toast && (
+        <div
+          role="status"
+          className={`flex items-start justify-between rounded-md border p-3 text-sm ${
+            toast.kind === 'success'
+              ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+              : 'border-red-300 bg-red-50 text-red-800'
+          }`}
+        >
+          <span>{toast.text}</span>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="ml-3 font-bold opacity-60 hover:opacity-100"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* ---- Tabs --------------------------------------------------------- */}
+      <div className="border-b border-slate-200">
+        <nav className="-mb-px flex gap-1" aria-label="Management sections">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                tab === t.key
+                  ? 'border-navy-700 text-navy-800'
+                  : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
+              }`}
+              aria-current={tab === t.key ? 'page' : undefined}
+            >
+              {t.label}
+            </button>
+          ))}
+
+          <div className="ml-auto flex items-center gap-2 pb-1.5">
+            <span
+              className={`badge ${live ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}
+              title={
+                live
+                  ? 'Connected to Supabase Realtime'
+                  : 'Realtime not connected -- use Refresh to update manually'
+              }
+            >
+              <span
+                aria-hidden
+                className={`mr-1.5 h-1.5 w-1.5 rounded-full ${live ? 'bg-emerald-500' : 'bg-slate-400'}`}
+              />
+              {live ? 'Live' : 'Offline'}
+            </span>
+
+            <button
+              type="button"
+              onClick={() => void loadDocuments()}
+              className="btn-secondary btn-sm"
+            >
+              Refresh
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleExport()}
+              className="btn-secondary btn-sm"
+            >
+              Export CSV
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleResyncAll()}
+              disabled={resyncing}
+              className="btn-primary btn-sm"
+            >
+              {resyncing ? 'Re-syncing...' : 'Re-sync all'}
+            </button>
+          </div>
+        </nav>
+      </div>
+
+      {/* ---- Queue banner -------------------------------------------------- */}
+      {queue.failed > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span className="font-medium">
+            {queue.failed} document{queue.failed === 1 ? '' : 's'} failed to sync.
+          </span>
+          <span className="text-xs">
+            The cron job retries automatically every 5 minutes.
+          </span>
+          <button
+            type="button"
+            onClick={() => void handleResyncAll()}
+            disabled={resyncing}
+            className="btn-secondary btn-sm ml-auto"
+          >
+            Retry now
+          </button>
+        </div>
+      )}
+
+      {/* ---- Panels --------------------------------------------------------- */}
+      {tab === 'documents' && (
+        <DocumentsTab
+          documents={documents}
+          loading={loading}
+          search={search}
+          setSearch={setSearch}
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          page={page}
+          setPage={setPage}
+          totalPages={totalPages}
+          total={total}
+          onResyncOne={handleResyncOne}
+        />
+      )}
+
+      {tab === 'users' && isSuperadmin && (
+        <UsersTab currentUserId={currentUser.id} onToast={setToast} />
+      )}
+
+      {tab === 'audit' && <AuditTab />}
+    </div>
+  );
+}
+
+export function AdminPortal({ currentUser }: { currentUser: CurrentUser }) {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-500">Loading management portal...</p>}>
+      <AdminPortalInner currentUser={currentUser} />
+    </Suspense>
+  );
+}
+
+export type { CurrentUser };
