@@ -2,10 +2,6 @@
 
 /**
  * Transient status banner for operation results.
- *
- * Extracted because AdminPortal and UsersTab both rendered the identical
- * block; duplicated markup drifts. Both callers wrap their content in a
- * `space-y-*` stack, which already provides the gap this needs.
  */
 export function Toast({
   toast,
@@ -30,7 +26,7 @@ export function Toast({
         type="button"
         onClick={onDismiss}
         className="ml-3 font-bold opacity-60 hover:opacity-100"
-        aria-label="Dismiss"
+        aria-label="Tutup pemberitahuan"
       >
         ×
       </button>

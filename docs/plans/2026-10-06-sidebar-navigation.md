@@ -1,5 +1,7 @@
 # Sidebar Navigation Layout Implementation Plan
 
+> Historical completed plan. Current navigation, scoped Cari Surat and removed export are documented in README/HANDOFF; the old labels/components below are not implementation instructions.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace the top navigation bar with a fixed left sidebar used by every role, while keeping the identity cluster (user icon, username/role, Sign out) at the top right of the content area exactly as it appears today, with the Sign out button recoloured red.

@@ -1,176 +1,129 @@
 import { getSupabaseAdmin, type DocumentRow } from '@/lib/supabase';
 import { requireUser, jsonError, handleRoute } from '@/lib/auth';
 import { writeAudit, AuditAction } from '@/lib/audit';
-import { appendDocumentRow, describeSheetsError } from '@/lib/google-sheets';
+import { fetchClassifications } from '@/lib/google-sheets';
+import { ensureLetterRegister } from '@/lib/letter-register';
+import { validateLetterInput, type LetterInput } from '@/lib/letter-fields';
+import { syncDocument } from '@/lib/resync';
 
 const MAX_BODY_BYTES = 64 * 1024;
-const MAX_TITLE_LENGTH = 300;
-const MAX_METADATA_KEYS = 40;
 
-/**
- * Create a document with an atomically generated ID, then attempt an immediate
- * Google Sheets append.
- *
- * Ordering matters: the database write happens FIRST and is never rolled back
- * by a Sheets failure. A Google outage must cost you a sync, not a document.
- * The row lands as 'pending', the append is attempted, and the status is then
- * corrected to 'synced' or 'failed'. Either way the document exists and the
- * cron job can retry the failed ones.
- */
+/** PostgreSQL allocates and persists first; a Sheets outage never loses a letter. */
 export async function POST(req: Request) {
   return handleRoute(async () => {
     const user = await requireUser();
-
     const body = await readBody(req);
-    if (!body) return jsonError('Invalid request body.', 400);
-
-    const title = typeof body.title === 'string' ? body.title.trim() : '';
-    if (!title) return jsonError('Title is required.', 400);
-    if (title.length > MAX_TITLE_LENGTH) {
-      return jsonError(`Title must be under ${MAX_TITLE_LENGTH} characters.`, 400);
+    if (!body) return jsonError('Isi permintaan tidak valid.', 400);
+    // Neither the official number nor the private row key is caller-allocated.
+    if ('id' in body || 'surat_number' in body || 'number' in body) {
+      return jsonError('Nomor surat ditetapkan secara otomatis.', 400);
     }
 
-    const metadata = sanitiseMetadata(body.metadata);
+    let input: LetterInput;
+    try {
+      input = validateLetterInput(body);
+    } catch (err) {
+      return jsonError(err instanceof Error ? err.message : 'Data surat tidak valid.', 400);
+    }
+    if (input.emergency && user.role !== 'admin' && user.role !== 'superadmin') {
+      return jsonError('Nomor darurat hanya dapat dibuat oleh administrator.', 403);
+    }
 
     const supabase = getSupabaseAdmin();
+    const [classifications, satker] = await Promise.all([
+      fetchClassifications(),
+      supabase.from('satkers').select('id').eq('name', input.metadata.kdSatker).maybeSingle(),
+    ]);
+    if (satker.error) {
+      console.error('[documents/generate] satker query failed:', satker.error.message);
+      return jsonError('Tidak dapat memeriksa katalog satker.', 500);
+    }
+    if (!classifications.some((item) => item.code === input.metadata.kdSurat)) {
+      return jsonError('Pilih KD Surat dari Acuan No Surat.', 400);
+    }
+    if (!satker.data) return jsonError('Pilih KD Satker yang terdaftar.', 400);
 
-    // ---- 1. Reserve the ID -------------------------------------------------
-    // get_next_document_id() takes a row lock on id_counter, so concurrent
-    // callers serialize and cannot receive the same number.
-    const { data: rawId, error: idError } = await supabase.rpc('get_next_document_id');
-
-    if (idError || typeof rawId !== 'number') {
-      console.error('[documents/generate] ID reservation failed:', idError?.message);
-      return jsonError('Could not allocate a document ID. Try again.', 500);
+    await ensureLetterRegister();
+    const { data, error } = await supabase.rpc('create_registered_document', {
+      p_user_id: user.id,
+      p_date: input.date,
+      p_title: input.hal,
+      p_metadata: input.metadata,
+      p_emergency: input.emergency,
+      p_reason: input.emergencyReason,
+    });
+    if (error) {
+      console.error('[documents/generate] allocation failed:', error.message);
+      if (error.message.startsWith('REGISTER_TRIM_PENDING:')) {
+        return Response.json({
+          code: 'REGISTER_TRIM_PENDING',
+          error: 'Pembersihan sisa nomor di Google Sheets masih menunggu konfirmasi. Gunakan Sinkronkan ulang semua sebelum menambah rentang nomor. Nomor belum dialokasikan.',
+        }, { status: 409 });
+      }
+      if (error.message.startsWith('REGISTER_RESTORE_CONFLICT:')) {
+        return Response.json({
+          code: 'REGISTER_RESTORE_CONFLICT',
+          error: 'Sisa nomor harian setelah pemangkasan belum dapat dipulihkan karena sudah ada rentang tanggal berikutnya. Hubungi administrator untuk meninjau surat terakhir yang dibuat setelah pemangkasan; bila surat itu dihapus, sinkronkan ulang semua lalu buat ulang. Nomor surat yang sudah dipakai tidak diubah dan nomor baru belum dialokasikan.',
+        }, { status: 409 });
+      }
+      if (error.message.includes('DAY_FULL')) {
+        return Response.json({
+          code: 'DAY_FULL',
+          error: 'Tidak ada nomor kosong pada tanggal ini. Administrator dapat mengonfirmasi nomor darurat dengan mengisi alasan.',
+        }, { status: 409 });
+      }
+      if (error.message.includes('DAY_MISSING')) {
+        return jsonError('Tanggal lampau ini tidak memiliki rentang register. Pilih tanggal yang tersedia atau hari ini.', 409);
+      }
+      if (error.message.startsWith('REGISTER_CONFLICT') || error.message.startsWith('TARGET_TOO_SMALL')) {
+        return Response.json({ code: 'REGISTER_CONFLICT', error: 'Rencana jumlah nomor bertentangan dengan rentang yang sudah tersedia. Hubungi administrator untuk meninjau atau menghapus rencana di Pengaturan Nomor Surat. Nomor belum dialokasikan.' }, { status: 409 });
+      }
+      if (error.message.includes('FORBIDDEN')) return jsonError('Pembuatan nomor ini tidak diizinkan.', 403);
+      if (error.message.includes('NON_TODAY_MANUAL_ONLY')) return jsonError('Untuk tanggal selain hari ini (WIB), pilih Ket MANUAL.', 400);
+      if (error.message.includes('INVALID_INPUT')) return jsonError('Data surat tidak valid.', 400);
+      return jsonError('Tidak dapat membuat nomor dan menyimpan surat. Coba lagi.', 500);
+    }
+    const doc = data as DocumentRow | null;
+    if (!doc || typeof doc.id !== 'number' || typeof doc.surat_number !== 'string') {
+      return jsonError('Register mengembalikan data surat yang tidak valid.', 500);
     }
 
-    const documentId = rawId;
-
-    // ---- 2. Persist --------------------------------------------------------
-    // A collision here is impossible given the lock above, but a PK violation
-    // is still handled rather than surfacing as an unhandled 500.
-    const { data: doc, error: insertError } = await supabase
-      .from('documents')
-      .insert({
-        id: documentId,
-        title,
-        metadata,
-        created_by: user.id,
-        sync_status: 'pending',
-        sync_attempts: 0,
-      })
-      .select('*')
-      .single<DocumentRow>();
-
-    if (insertError) {
-      console.error(
-        `[documents/generate] insert failed for id ${documentId}:`,
-        insertError.message,
-      );
-      return jsonError('Could not save the document. Try again.', 500);
-    }
-
-    // ---- 3. Audit ----------------------------------------------------------
     await writeAudit({
       userId: user.id,
       action: AuditAction.CREATE_DOC,
-      targetId: documentId,
-      details: { title, metadata },
-    });
-
-    // ---- 4. Attempt the Sheets append --------------------------------------
-    // Failures are caught and recorded, never rethrown. The user's document
-    // is already safe in Postgres.
-    let syncStatus: 'synced' | 'failed' = 'failed';
-    let syncError: string | null = null;
-
-    try {
-      await appendDocumentRow(doc, user.username);
-      syncStatus = 'synced';
-    } catch (err) {
-      syncError = describeSheetsError(err);
-      console.error(`[documents/generate] Sheets append failed for id ${documentId}:`, syncError);
-    }
-
-    const { error: statusError } = await supabase
-      .from('documents')
-      .update({
-        sync_status: syncStatus,
-        sync_attempts: 1,
-        last_sync_error: syncStatus === 'synced' ? null : syncError,
-      })
-      .eq('id', documentId);
-
-    if (statusError) {
-      // The document is saved either way; the cron job will pick it up because
-      // it is still 'pending'.
-      console.error(
-        `[documents/generate] status update failed for id ${documentId}:`,
-        statusError.message,
-      );
-    }
-
-    return Response.json(
-      {
-        document: {
-          id: documentId,
-          title: doc.title,
-          metadata: doc.metadata,
-          created_at: doc.created_at,
-          sync_status: syncStatus,
-        },
-        // Distinct messages: the user should know whether to expect their row
-        // in the sheet now or after the next retry.
-        message:
-          syncStatus === 'synced'
-            ? `Document ${documentId} created and synced to Google Sheets.`
-            : `Document ${documentId} created, but the Google Sheets sync failed. ` +
-              'It is queued for automatic retry every 5 minutes.',
-        syncWarning: syncStatus === 'failed' ? syncError : null,
+      targetId: doc.id,
+      details: {
+        surat_number: doc.surat_number,
+        date: input.date,
+        title: input.hal,
+        metadata: input.metadata,
+        emergency: input.emergency,
+        emergencyReason: input.emergencyReason,
       },
-      { status: 201 },
-    );
+    });
+    const outcome = await syncDocument(doc);
+    return Response.json({
+      document: outcome.document ?? doc,
+      message: outcome.ok
+        ? `Surat ${doc.surat_number} dibuat dan disinkronkan ke Google Sheets.`
+        : outcome.statusPersisted
+          ? `Surat ${doc.surat_number} tersimpan. Sinkronisasi Google Sheets masih dalam antrean untuk dicoba kembali.`
+          : `Surat ${doc.surat_number} tersimpan, tetapi hasil sinkronisasi belum dapat dikonfirmasi.`,
+      syncWarning: outcome.ok ? null : outcome.error,
+    }, { status: 201 });
   });
-}
-
-/**
- * Validate free-form metadata.
- *
- * Metadata lands in a JSONB column, a spreadsheet cell and a CSV export, so it
- * must not be able to be enormous, deeply nested, or carry non-string keys.
- */
-function sanitiseMetadata(input: unknown): Record<string, unknown> {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
-
-  const entries = Object.entries(input as Record<string, unknown>).slice(0, MAX_METADATA_KEYS);
-  const result: Record<string, unknown> = {};
-
-  for (const [key, value] of entries) {
-    const cleanKey = String(key).slice(0, 100);
-    if (!cleanKey) continue;
-
-    // Allow only primitives and one level of array, flattened to a string.
-    if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
-      result[cleanKey] = value;
-    } else if (Array.isArray(value)) {
-      result[cleanKey] = value.slice(0, 50).map((v) => String(v).slice(0, 500));
-    } else {
-      result[cleanKey] = JSON.stringify(value).slice(0, 2000);
-    }
-  }
-
-  return result;
 }
 
 async function readBody(req: Request): Promise<Record<string, unknown> | null> {
   const length = Number(req.headers.get('content-length') ?? '0');
   if (length > MAX_BODY_BYTES) return null;
-
   try {
-    const text = await req.text();
-    if (text.length > MAX_BODY_BYTES) return null;
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    const bytes = await req.arrayBuffer();
+    if (bytes.byteLength > MAX_BODY_BYTES) return null;
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
   } catch {
     return null;
   }

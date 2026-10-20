@@ -1,23 +1,27 @@
-import { AdminPortal } from '@/components/AdminPortal';
+import { DocumentPortal } from '@/components/DocumentPortal';
+import { redirect } from 'next/navigation';
+import { getFreshSession } from '@/lib/auth';
 
 /**
- * Management Portal -- Documents section.
+ * Administrator letter creation.
  *
- * Shell is in ../../(portal)/layout.tsx, role gate in ./layout.tsx. Both
- * already redirect when the session is missing, so this page does not re-check:
- * AdminPortal takes no user context.
+ * Shell and route layout also check access. Re-read the user here so
+ * management controls follow the latest role, not a stale cookie.
  */
-export default function AdminDocumentsPage() {
+export default async function AdminDocumentsPage() {
+  const user = await getFreshSession();
+  if (!user) redirect('/login');
+  const canManage = user.role === 'admin' || user.role === 'superadmin';
+  if (!canManage) redirect('/dashboard');
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-navy-900">Management Portal</h1>
+        <h1 className="text-2xl font-bold text-navy-900">Buat Nomor Surat</h1>
         <p className="mt-1 text-sm text-slate-600">
-          All documents, live sync status, and manual re-sync.
+          Daftarkan surat baru dan kelola katalog satker.
         </p>
       </div>
-
-      <AdminPortal />
+      <DocumentPortal canManage={canManage} />
     </>
   );
 }

@@ -36,7 +36,7 @@ const CASES = [
   ['superadmin', 'approved'],
 ];
 
-const PAGES = ['/dashboard', '/admin', '/profile', '/login', '/register'];
+const PAGES = ['/dashboard', '/admin', '/documents', '/register-sheet', '/profile', '/login', '/register'];
 
 for (const [r, status] of CASES) {
   const token = await mint(r, status);

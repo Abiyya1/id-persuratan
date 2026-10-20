@@ -24,7 +24,7 @@ export interface SessionUser {
   status: UserStatus;
 }
 
-export const PENDING_MESSAGE = 'Your account is pending Superadmin approval.';
+export const PENDING_MESSAGE = 'Akun Anda menunggu persetujuan administrator.';
 
 // ---------------------------------------------------------------------------
 // Password hashing
@@ -43,19 +43,19 @@ export function verifyPassword(plain: string, hash: string): Promise<boolean> {
  * Returns an error string, or null when the password is acceptable.
  */
 export function validatePasswordStrength(plain: string): string | null {
-  if (plain.length < 8) return 'Password must be at least 8 characters.';
-  if (plain.length > 200) return 'Password must be under 200 characters.';
-  if (!/[a-zA-Z]/.test(plain)) return 'Password must contain at least one letter.';
-  if (!/[0-9]/.test(plain)) return 'Password must contain at least one number.';
+  if (plain.length < 8) return 'Kata sandi harus terdiri dari minimal 8 karakter.';
+  if (plain.length > 200) return 'Kata sandi tidak boleh melebihi 200 karakter.';
+  if (!/[a-zA-Z]/.test(plain)) return 'Kata sandi harus mengandung minimal satu huruf.';
+  if (!/[0-9]/.test(plain)) return 'Kata sandi harus mengandung minimal satu angka.';
   return null;
 }
 
 /** Usernames go into URLs, logs and a spreadsheet column. Keep them boring. */
 export function validateUsername(username: string): string | null {
-  if (username.length < 3) return 'Username must be at least 3 characters.';
-  if (username.length > 50) return 'Username must be under 50 characters.';
+  if (username.length < 3) return 'Nama pengguna harus terdiri dari minimal 3 karakter.';
+  if (username.length > 50) return 'Nama pengguna tidak boleh melebihi 50 karakter.';
   if (!/^[a-zA-Z0-9._-]+$/.test(username)) {
-    return 'Username may only contain letters, numbers, dot, underscore and hyphen.';
+    return 'Nama pengguna hanya boleh mengandung huruf, angka, titik, garis bawah, dan tanda hubung.';
   }
   return null;
 }
@@ -210,7 +210,7 @@ export class AuthError extends Error {
 /** Any logged-in, approved account. */
 export async function requireUser(): Promise<SessionUser> {
   const user = await getFreshSession();
-  if (!user) throw new AuthError('Not authenticated.', 401);
+  if (!user) throw new AuthError('Anda belum masuk.', 401);
   return user;
 }
 
@@ -218,7 +218,7 @@ export async function requireUser(): Promise<SessionUser> {
 export async function requireAdmin(): Promise<SessionUser> {
   const user = await requireUser();
   if (user.role !== 'admin' && user.role !== 'superadmin') {
-    throw new AuthError('Administrator access required.', 403);
+    throw new AuthError('Akses administrator diperlukan.', 403);
   }
   return user;
 }
@@ -227,7 +227,7 @@ export async function requireAdmin(): Promise<SessionUser> {
 export async function requireSuperadmin(): Promise<SessionUser> {
   const user = await requireUser();
   if (user.role !== 'superadmin') {
-    throw new AuthError('Superadmin access required.', 403);
+    throw new AuthError('Akses Administrator Utama diperlukan.', 403);
   }
   return user;
 }
@@ -251,6 +251,6 @@ export async function handleRoute(
       return jsonError(err.message, err.status);
     }
     console.error('[api] unhandled error:', err);
-    return jsonError('Internal server error.', 500);
+    return jsonError('Terjadi kesalahan internal pada server.', 500);
   }
 }

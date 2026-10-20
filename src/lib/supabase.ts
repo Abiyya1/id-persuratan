@@ -23,6 +23,9 @@ export type PublicUser = Omit<UserRow, 'password_hash'>;
 
 export interface DocumentRow {
   id: number;
+  /** Official letter number; may contain an emergency suffix such as 3951.a. */
+  surat_number: string;
+  letter_date: string | null;
   title: string;
   metadata: Record<string, unknown>;
   created_by: string | null;
@@ -59,11 +62,10 @@ function required(name: string): string {
 /**
  * Server-side Supabase client using the SERVICE ROLE key.
  *
- * The service role bypasses RLS, which is what lets API routes read `users`
- * and write `documents` while anon gets SELECT-only on documents.
+ * The service role bypasses RLS; API routes enforce fresh approval and ownership.
+ * Browser components use those guarded routes, never direct database access.
  *
- * NEVER import this into a client component -- the key would ship to the
- * browser. Use `getBrowserClient()` from ./supabase-client for that.
+ * NEVER import this into a client component -- the key would ship to the browser.
  */
 export function getSupabaseAdmin(): SupabaseClient {
   return createClient(

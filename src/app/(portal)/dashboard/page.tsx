@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getFreshSession } from '@/lib/auth';
 import { DocumentPortal } from '@/components/DocumentPortal';
-import type { DocumentRow } from '@/lib/supabase';
 
 /**
  * Dashboard 1 -- User Portal.
@@ -16,16 +15,14 @@ export default async function DashboardPage() {
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-navy-900">My Documents</h1>
+        <h1 className="text-2xl font-bold text-navy-900">Buat Nomor Surat</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Submit a document to receive an atomic, duplicate-proof ID.
+          Daftarkan surat baru. Surat yang sudah dibuat tersedia di Cari Surat.
         </p>
       </div>
 
       <DocumentPortal
-        userId={user.id}
-        username={user.username}
-        initialDocuments={[] as DocumentRow[]}
+        canManage={user.role === 'admin' || user.role === 'superadmin'}
       />
     </>
   );

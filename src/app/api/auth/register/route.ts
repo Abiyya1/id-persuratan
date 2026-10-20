@@ -17,13 +17,13 @@ const UNIQUE_VIOLATION = '23505';
 export async function POST(req: Request) {
   return handleRoute(async () => {
     const body = await readBody(req);
-    if (!body) return jsonError('Invalid request body.', 400);
+    if (!body) return jsonError('Isi permintaan tidak valid.', 400);
 
     const username = typeof body.username === 'string' ? body.username.trim() : '';
     const password = typeof body.password === 'string' ? body.password : '';
 
     if (!username || !password) {
-      return jsonError('Username and password are required.', 400);
+      return jsonError('Nama pengguna dan kata sandi wajib diisi.', 400);
     }
 
     const usernameError = validateUsername(username);
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
 
     // Do not confirm whether the username is taken -- that would let anyone
     // enumerate accounts. Message stays deliberately vague.
-    if (existing) return jsonError('Unable to register with those details.', 409);
+    if (existing) return jsonError('Tidak dapat mendaftar dengan data tersebut.', 409);
 
     const { data: created, error: insertError } = await supabase
       .from('users')
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
         username,
         password_hash: await hashPassword(password),
         role: 'user', // Never client-controlled. Always the lowest privilege.
-        status: 'pending', // Blocked until a superadmin approves.
+        status: 'pending', // Blocked until an approved administrator decides the request.
       })
       .select('id, username, role, status')
       .single();
@@ -64,11 +64,11 @@ export async function POST(req: Request) {
       // Two simultaneous registrations for the same name: the loser lands here.
       // Return the same 409 as the pre-check so behaviour is identical.
       if (insertError.code === UNIQUE_VIOLATION) {
-        return jsonError('Unable to register with those details.', 409);
+        return jsonError('Tidak dapat mendaftar dengan data tersebut.', 409);
       }
 
       console.error('[register] insert failed:', insertError.message);
-      return jsonError('Registration is temporarily unavailable.', 500);
+      return jsonError('Layanan pendaftaran untuk sementara tidak tersedia.', 500);
     }
 
     await writeAudit({
@@ -83,8 +83,8 @@ export async function POST(req: Request) {
     return Response.json(
       {
         message:
-          'Registration received. Your account is pending Superadmin approval. ' +
-          'You will be able to sign in once it has been approved.',
+          'Pendaftaran diterima. Akun Anda menunggu persetujuan administrator. ' +
+          'Anda dapat masuk setelah akun disetujui.',
         user: { username: created.username, status: created.status },
         pending: true,
       },

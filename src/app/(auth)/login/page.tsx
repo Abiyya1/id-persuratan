@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { Suspense, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Suspense } from 'react';
 
 /**
  * Login form.
@@ -26,9 +25,9 @@ function LoginForm() {
 
   // Banner copy for each reason middleware can send.
   const banners: Record<string, string> = {
-    pending: 'Your account is pending Superadmin approval.',
-    rejected: 'Your account has been rejected. Contact the administrator.',
-    forbidden: 'That area requires administrator access.',
+    pending: 'Akun Anda menunggu persetujuan administrator.',
+    rejected: 'Akun Anda ditolak. Hubungi administrator.',
+    forbidden: 'Halaman tersebut memerlukan akses administrator.',
   };
 
   const banner = reason ? banners[reason] : null;
@@ -48,7 +47,7 @@ function LoginForm() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error ?? 'Sign in failed.');
+        setError(data.error ?? 'Gagal masuk.');
         return;
       }
 
@@ -62,7 +61,7 @@ function LoginForm() {
       router.push(target);
       router.refresh();
     } catch {
-      setError('Could not reach the server. Check your connection and try again.');
+      setError('Tidak dapat menghubungi server. Periksa koneksi Anda dan coba lagi.');
     } finally {
       setSubmitting(false);
     }
@@ -70,9 +69,9 @@ function LoginForm() {
 
   return (
     <div className="card animate-fade-in p-8">
-      <h1 className="text-xl font-bold text-navy-900">Sign in</h1>
+      <h1 className="text-xl font-bold text-navy-900">Masuk</h1>
       <p className="mt-1 text-sm text-slate-600">
-        Enter your credentials to reach your portal.
+        Masukkan nama pengguna dan kata sandi untuk mengakses aplikasi.
       </p>
 
       {banner && (
@@ -96,7 +95,7 @@ function LoginForm() {
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
         <div>
           <label htmlFor="username" className="label">
-            Username
+            Nama pengguna
           </label>
           <input
             id="username"
@@ -113,7 +112,7 @@ function LoginForm() {
 
         <div>
           <label htmlFor="password" className="label">
-            Password
+            Kata sandi
           </label>
           <input
             id="password"
@@ -128,14 +127,14 @@ function LoginForm() {
         </div>
 
         <button type="submit" disabled={submitting} className="btn-primary w-full">
-          {submitting ? 'Signing in...' : 'Sign in'}
+          {submitting ? 'Sedang masuk...' : 'Masuk'}
         </button>
       </form>
 
       <p className="mt-6 border-t border-slate-200 pt-4 text-center text-sm text-slate-600">
-        Need an account?{' '}
+        Belum punya akun?{' '}
         <Link href="/register" className="font-medium text-navy-700 hover:underline">
-          Request access
+          Ajukan akses
         </Link>
       </p>
     </div>
@@ -147,7 +146,7 @@ export default function LoginPage() {
     <Suspense
       fallback={
         <div className="card p-8">
-          <p className="text-center text-sm text-slate-500">Loading...</p>
+          <p className="text-center text-sm text-slate-500">Memuat...</p>
         </div>
       }
     >

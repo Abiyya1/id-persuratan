@@ -23,16 +23,16 @@ export default function RegisterPage() {
   // Mirrors validateUsername / validatePasswordStrength on the server.
   const usernameError =
     username.length > 0 && username.length < 3
-      ? 'At least 3 characters.'
+      ? 'Minimal 3 karakter.'
       : username.length > 0 && !/^[a-zA-Z0-9._-]+$/.test(username)
-        ? 'Only letters, numbers, dot, underscore and hyphen.'
+        ? 'Hanya huruf, angka, titik, garis bawah, dan tanda hubung.'
         : null;
 
   const passwordError =
     password.length > 0 && password.length < 8
-      ? 'At least 8 characters.'
+      ? 'Minimal 8 karakter.'
       : password.length > 0 && (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password))
-        ? 'Needs at least one letter and one number.'
+        ? 'Harus mengandung minimal satu huruf dan satu angka.'
         : null;
 
   const mismatch = confirm.length > 0 && confirm !== password;
@@ -56,13 +56,13 @@ export default function RegisterPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error ?? 'Registration failed.');
+        setError(data.error ?? 'Pendaftaran gagal.');
         return;
       }
 
       setDone(true);
     } catch {
-      setError('Could not reach the server. Check your connection and try again.');
+      setError('Tidak dapat menghubungi server. Periksa koneksi Anda dan coba lagi.');
     } finally {
       setSubmitting(false);
     }
@@ -74,14 +74,14 @@ export default function RegisterPage() {
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-2xl">
           ⏳
         </div>
-        <h1 className="text-xl font-bold text-navy-900">Registration received</h1>
+        <h1 className="text-xl font-bold text-navy-900">Pendaftaran diterima</h1>
         <p className="mt-3 text-sm leading-relaxed text-slate-600">
-          Your account <span className="font-semibold">{username}</span> is pending
-          Superadmin approval. You will be able to sign in once a Superadmin has
-          approved it.
+          Akun <span className="font-semibold">{username}</span> menunggu
+          persetujuan administrator. Anda dapat masuk setelah akun
+          disetujui.
         </p>
         <Link href="/login" className="btn-primary mt-6 w-full">
-          Go to sign in
+          Ke halaman masuk
         </Link>
       </div>
     );
@@ -89,10 +89,10 @@ export default function RegisterPage() {
 
   return (
     <div className="card animate-fade-in p-8">
-      <h1 className="text-xl font-bold text-navy-900">Request an account</h1>
+      <h1 className="text-xl font-bold text-navy-900">Ajukan akun</h1>
       <p className="mt-1 text-sm text-slate-600">
-        New accounts start with the <span className="font-medium">user</span> role and
-        require approval.
+        Akun baru memiliki peran <span className="font-medium">Pengguna</span> dan
+        memerlukan persetujuan.
       </p>
 
       {error && (
@@ -107,7 +107,7 @@ export default function RegisterPage() {
       <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
         <div>
           <label htmlFor="username" className="label">
-            Username
+            Nama pengguna
           </label>
           <input
             id="username"
@@ -121,14 +121,14 @@ export default function RegisterPage() {
             aria-describedby="username-hint"
           />
           <p id="username-hint" className="mt-1 text-xs text-slate-500">
-            3-50 characters. Letters, numbers, dot, underscore, hyphen.
+            3–50 karakter. Huruf, angka, titik, garis bawah, dan tanda hubung.
           </p>
           {usernameError && <p className="mt-1 text-xs text-red-600">{usernameError}</p>}
         </div>
 
         <div>
           <label htmlFor="password" className="label">
-            Password
+            Kata sandi
           </label>
           <input
             id="password"
@@ -141,14 +141,14 @@ export default function RegisterPage() {
             aria-describedby="password-hint"
           />
           <p id="password-hint" className="mt-1 text-xs text-slate-500">
-            At least 8 characters, with a letter and a number.
+            Minimal 8 karakter, dengan huruf dan angka.
           </p>
           {passwordError && <p className="mt-1 text-xs text-red-600">{passwordError}</p>}
         </div>
 
         <div>
           <label htmlFor="confirm" className="label">
-            Confirm password
+            Konfirmasi kata sandi
           </label>
           <input
             id="confirm"
@@ -159,7 +159,7 @@ export default function RegisterPage() {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
           />
-          {mismatch && <p className="mt-1 text-xs text-red-600">Passwords do not match.</p>}
+          {mismatch && <p className="mt-1 text-xs text-red-600">Konfirmasi kata sandi tidak cocok.</p>}
         </div>
 
         <button
@@ -167,14 +167,14 @@ export default function RegisterPage() {
           disabled={submitting || Boolean(usernameError || passwordError || mismatch)}
           className="btn-primary w-full"
         >
-          {submitting ? 'Submitting...' : 'Submit request'}
+          {submitting ? 'Mengirim...' : 'Kirim pengajuan'}
         </button>
       </form>
 
       <p className="mt-6 border-t border-slate-200 pt-4 text-center text-sm text-slate-600">
-        Already approved?{' '}
+        Akun sudah disetujui?{' '}
         <Link href="/login" className="font-medium text-navy-700 hover:underline">
-          Sign in
+          Masuk
         </Link>
       </p>
     </div>

@@ -13,9 +13,9 @@ export default async function ProfilePage() {
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-navy-900">Profile</h1>
+        <h1 className="text-2xl font-bold text-navy-900">Profil</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Update your username or change your password.
+          Perbarui nama pengguna atau ganti kata sandi Anda.
         </p>
       </div>
 

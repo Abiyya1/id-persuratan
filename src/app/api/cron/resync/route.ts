@@ -1,97 +1,101 @@
-import { handleRoute } from '@/lib/auth';
+import { AuthError, handleRoute } from '@/lib/auth';
+import { getSupabaseAdmin } from '@/lib/supabase';
 import { writeAudit, AuditAction } from '@/lib/audit';
 import { retryFailedDocuments, countUnsynced } from '@/lib/resync';
-import { checkSheetsConfig } from '@/lib/google-sheets';
+import { checkSheetsConfig, syncRegisterCalendar, describeSheetsError, sheetsUserMessage } from '@/lib/google-sheets';
+import { ensureLetterRegister } from '@/lib/letter-register';
+import { getRegisterToday } from '@/lib/letter-fields';
 
-/**
- * Vercel Cron entry point -- runs every 5 minutes (see vercel.json).
- *
- * Authenticated with CRON_SECRET, NOT a session cookie. Vercel sends the
- * secret as `Authorization: Bearer <CRON_SECRET>`; anything else gets 401.
- * This exclusion is why middleware.ts skips the /api/* prefix -- there is no
- * cookie to check here.
- */
+/** Five-minute cron closes elapsed WIB days and retries the persisted projection queue. */
 export async function GET(req: Request) {
   return handleRoute(async () => {
-    // ---- Auth ---------------------------------------------------------------
     const secret = process.env.CRON_SECRET;
-
     if (!secret) {
       console.error('[cron/resync] CRON_SECRET is not configured.');
-      return Response.json({ error: 'Cron is not configured.' }, { status: 500 });
+      return Response.json({ error: 'Penjadwal sinkronisasi belum dikonfigurasi.' }, { status: 500 });
+    }
+    if (!timingSafeEqual(req.headers.get('authorization') ?? '', `Bearer ${secret}`)) {
+      return Response.json({ error: 'Akses tidak diizinkan.' }, { status: 401 });
     }
 
-    const authHeader = req.headers.get('authorization') ?? '';
-    const expected = `Bearer ${secret}`;
-
-    // Constant-time compare so the secret cannot be recovered by timing the
-    // endpoint.
-    if (!timingSafeEqual(authHeader, expected)) {
-      return Response.json({ error: 'Unauthorized.' }, { status: 401 });
-    }
-
-    // ---- Preflight ----------------------------------------------------------
-    // Fail fast and loudly if Sheets is unconfigured, rather than burning
-    // through the batch marking every row failed for the same reason.
-    const config = await checkSheetsConfig();
-    if (!config.ok) {
-      console.error('[cron/resync] Google Sheets is not configured:', config.detail);
-      return Response.json(
-        { error: 'Google Sheets is not configured.', detail: config.detail },
-        { status: 500 },
-      );
-    }
-
-    // ---- Retry --------------------------------------------------------------
     const startedAt = Date.now();
-    const outcomes = await retryFailedDocuments({ batchSize: 25 });
+    try {
+      await ensureLetterRegister();
+      // Vercel's daily UTC16:59 trigger is WIB23:59; delayed runs use normal catchup.
+      const clock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+      const closeToday = new URL(req.url).searchParams.get('closeDay') === '1' && clock === '23:59';
+      const tomorrow = new Date(`${getRegisterToday()}T00:00:00Z`);
+      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+      const { error: closeError } = await getSupabaseAdmin().rpc('close_letter_days', closeToday ? { p_today: tomorrow.toISOString().slice(0, 10) } : {});
+      const closingDeferred = closeError?.message.startsWith('REGISTER_TRIM_PENDING:') ?? false;
+      if (closeError && !closingDeferred) {
+        console.error('[cron/resync] day closing failed:', closeError.message);
+        if (closeError.message.startsWith('REGISTER_CONFLICT') || closeError.message.startsWith('TARGET_TOO_SMALL')) {
+          throw new AuthError('Rencana jumlah nomor bertentangan dengan rentang register. Administrator perlu meninjau atau menghapus rencana di Pengaturan Nomor Surat; nomor yang sudah ada tidak diubah.', 409);
+        }
+        throw new Error('Tidak dapat menutup register tanggal yang telah berlalu.');
+      }
 
-    const succeeded = outcomes.filter((o) => o.ok).length;
-    const failed = outcomes.length - succeeded;
-    const remaining = await countUnsynced();
-
-    const summary = {
-      attempted: outcomes.length,
-      succeeded,
-      failed,
-      remainingFailed: remaining.failed,
-      durationMs: Date.now() - startedAt,
-    };
-
-    // Log one summary line per run. A run with nothing to do is normal and
-    // should not fill the audit table.
-    if (outcomes.length > 0) {
+      // Closing is a DB operation and must not be skipped just because Sheets is unavailable.
+      const config = await checkSheetsConfig();
+      if (!config.ok) throw new Error(`Google Sheets belum dikonfigurasi: ${config.detail}`);
+      let calendarError: string | null = null;
+      try {
+        await syncRegisterCalendar();
+      } catch (err) {
+        calendarError = sheetsUserMessage(err);
+        console.error('[cron/resync] calendar projection failed:', describeSheetsError(err));
+      }
+      const outcomes = await retryFailedDocuments({ batchSize: 25 });
+      const succeeded = outcomes.filter((outcome) => outcome.ok).length;
+      const failed = outcomes.length - succeeded;
+      const remaining = await countUnsynced();
+      const ok = failed === 0 && calendarError === null;
+      const summary = {
+        attempted: outcomes.length,
+        succeeded,
+        failed,
+        remainingFailed: remaining.failed,
+        remainingPending: remaining.pending,
+        calendarError,
+        closingDeferred,
+        durationMs: Date.now() - startedAt,
+      };
+      if (outcomes.length > 0 || !ok) {
+        await writeAudit({
+          userId: null,
+          action: AuditAction.CRON_RESYNC,
+          targetId: 'batch',
+          details: summary,
+        });
+      }
+      console.log('[cron/resync]', JSON.stringify(summary));
+      return Response.json({
+        ok,
+        ...summary,
+        failures: outcomes.filter((outcome) => !outcome.ok).slice(0, 10)
+          .map((outcome) => ({ id: outcome.documentId, error: outcome.error })),
+      }, { status: ok ? 200 : 500 });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Pembaruan register tertunda gagal.';
+      console.error('[cron/resync]', error);
       await writeAudit({
-        userId: null, // System-initiated, no acting user.
+        userId: null,
         action: AuditAction.CRON_RESYNC,
         targetId: 'batch',
-        details: summary,
+        details: { error, durationMs: Date.now() - startedAt },
       });
+      return Response.json({ ok: false, error }, { status: err instanceof AuthError ? err.status : 500 });
     }
-
-    console.log('[cron/resync]', JSON.stringify(summary));
-
-    return Response.json({
-      ok: true,
-      ...summary,
-      // Surfaced so a partially-failing queue is visible in the Vercel logs
-      // even when every individual append failed.
-      failures: outcomes
-        .filter((o) => !o.ok)
-        .slice(0, 10)
-        .map((o) => ({ id: o.documentId, error: o.error })),
-    });
   });
 }
 
 /** Length-safe, constant-time string comparison. */
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
-
   let diff = 0;
   for (let i = 0; i < a.length; i += 1) {
     diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
-
   return diff === 0;
 }

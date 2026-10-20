@@ -31,7 +31,7 @@ export async function PATCH(req: Request) {
     const user = await requireUser();
 
     const body = await readBody(req);
-    if (!body) return jsonError('Invalid request body.', 400);
+    if (!body) return jsonError('Isi permintaan tidak valid.', 400);
 
     const supabase = getSupabaseAdmin();
     let changed = false;
@@ -54,10 +54,10 @@ export async function PATCH(req: Request) {
       if (error) {
         // Two accounts differing only by case would violate the LOWER() index.
         if (error.code === UNIQUE_VIOLATION) {
-          return jsonError(`Username "${username}" is already taken.`, 409);
+          return jsonError(`Nama pengguna "${username}" sudah digunakan.`, 409);
         }
         console.error('[profile/update] username change failed:', error.message);
-        return jsonError('Could not update the username.', 500);
+        return jsonError('Tidak dapat memperbarui nama pengguna.', 500);
       }
 
       details.username = { from: user.username, to: updated.username };
@@ -77,7 +77,7 @@ export async function PATCH(req: Request) {
         typeof body.currentPassword === 'string' ? body.currentPassword : '';
 
       if (!currentPassword) {
-        return jsonError('Your current password is required to set a new one.', 400);
+        return jsonError('Kata sandi saat ini wajib diisi untuk membuat kata sandi baru.', 400);
       }
 
       const passwordError = validatePasswordStrength(body.newPassword);
@@ -91,10 +91,10 @@ export async function PATCH(req: Request) {
 
       if (fetchError) {
         console.error('[profile/update] fetch failed:', fetchError.message);
-        return jsonError('Could not verify your password.', 500);
+        return jsonError('Tidak dapat memverifikasi kata sandi Anda.', 500);
       }
 
-      if (!record) return jsonError('Account not found.', 404);
+      if (!record) return jsonError('Akun tidak ditemukan.', 404);
 
       const valid = await verifyPassword(currentPassword, record.password_hash);
       if (!valid) {
@@ -105,7 +105,7 @@ export async function PATCH(req: Request) {
           targetId: user.id,
           details: { outcome: 'failed_bad_current_password' },
         });
-        return jsonError('Your current password is incorrect.', 401);
+        return jsonError('Kata sandi saat ini salah.', 401);
       }
 
       const newHash = await hashPassword(body.newPassword);
@@ -117,7 +117,7 @@ export async function PATCH(req: Request) {
 
       if (updateError) {
         console.error('[profile/update] password change failed:', updateError.message);
-        return jsonError('Could not update the password.', 500);
+        return jsonError('Tidak dapat memperbarui kata sandi.', 500);
       }
 
       await writeAudit({
@@ -131,7 +131,7 @@ export async function PATCH(req: Request) {
     }
 
     if (!changed) {
-      return jsonError('Nothing to update.', 400);
+      return jsonError('Tidak ada perubahan untuk disimpan.', 400);
     }
 
     // ---- Re-mint the session so the JWT reflects the new state ---------------
@@ -150,12 +150,12 @@ export async function PATCH(req: Request) {
       });
 
       return Response.json({
-        message: 'Profile updated.',
+        message: 'Profil diperbarui.',
         user: { id: fresh.id, username: fresh.username, role: fresh.role },
       });
     }
 
-    return Response.json({ message: 'Profile updated.' });
+    return Response.json({ message: 'Profil diperbarui.' });
   });
 }
 

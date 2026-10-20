@@ -1,7 +1,7 @@
 -- ============================================================================
--- Document Labeling & ID Management System -- Full Schema
--- Run this ONCE in Supabase Dashboard -> SQL Editor -> New Query -> Run.
--- It is idempotent enough to re-run safely.
+-- Document Labeling & ID Management System -- Base Schema
+-- Fresh install: schema, 20261006_letter_register, 20261007_document_delete, seed.
+-- Existing installations: apply unapplied migrations only; never reset the counter.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -137,12 +137,8 @@ CREATE TRIGGER documents_touch_updated_at
 -- restrict the application. They exist to control what the *public* anon key
 -- can reach from the browser.
 --
--- Deliberately exposed via anon key:
---   documents  -- SELECT only, so Supabase Realtime can push INSERT/UPDATE
---                 events to Dashboard 2's table. Assume titles and metadata
---                 are readable by anyone holding the anon key.
--- Deliberately NOT exposed:
---   users, audit_logs, id_counter -- no anon policies at all.
+-- No browser SELECT/write policies: all letters and private tables are accessed
+-- through API routes with fresh account approval and role/ownership checks.
 -- ============================================================================
 
 ALTER TABLE public.users      ENABLE ROW LEVEL SECURITY;
@@ -150,53 +146,11 @@ ALTER TABLE public.documents  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.id_counter ENABLE ROW LEVEL SECURITY;
 
--- Realtime delivers rows the client is authorized to SELECT. Without this
--- policy the socket connects, authenticates as 'anon', and silently receives
--- zero events.
+-- Remove the obsolete anonymous Realtime read grant if present.
 DROP POLICY IF EXISTS documents_anon_select ON public.documents;
-CREATE POLICY documents_anon_select
-  ON public.documents
-  FOR SELECT
-  TO anon, authenticated
-  USING (true);
-
--- anon gets no INSERT/UPDATE/DELETE policy, so all writes are rejected.
--- Every mutation must go through an API route using the service role.
-
--- ============================================================================
--- 8. Supabase Realtime
---
--- Two requirements, both easy to miss:
---   a) REPLICA IDENTITY FULL -- without it, UPDATE/DELETE payloads arrive
---      with the primary key NULL and updates cannot be matched.
---   b) Table listed in the 'supabase_realtime' publication -- without this
---      the table is not streamed at all, with no error message.
--- ============================================================================
-ALTER TABLE public.documents REPLICA IDENTITY FULL;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
-    CREATE PUBLICATION supabase_realtime;
-  END IF;
-END
-$$;
-
--- CREATE PUBLICATION ... FOR TABLE fails if the table is already a member,
--- so guard each ADD.
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_publication_tables
-    WHERE pubname = 'supabase_realtime' AND tablename = 'documents'
-  ) THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE public.documents;
-  END IF;
-END
-$$;
 
 -- ----------------------------------------------------------------------------
--- 8b. Atomic sync-queue update
+-- 8. Atomic sync-queue update
 --
 -- The cron job and a manual "Re-sync" button can fire at the same time for the
 -- same document. A read-modify-write in JS would lose one increment, so the
@@ -242,4 +196,4 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 COMMENT ON FUNCTION public.get_next_document_id() IS
   'Atomically reserves and returns the next document ID. Gaps are possible; duplicates are not.';
 COMMENT ON TABLE public.documents IS
-  'Document labels. SELECT is world-readable so Supabase Realtime can stream changes to admins.';
+  'Application letters. Access requires fresh approval and API role/ownership checks.';

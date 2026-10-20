@@ -20,6 +20,6 @@ export async function POST() {
     }
 
     await clearSessionCookie();
-    return Response.json({ message: 'Signed out.' });
+    return Response.json({ message: 'Berhasil keluar.' });
   });
 }

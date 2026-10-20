@@ -11,9 +11,9 @@ export function SyncBadge({ status }: { status: SyncStatus }) {
   };
 
   const labels: Record<SyncStatus, string> = {
-    synced: 'Synced',
-    pending: 'Pending',
-    failed: 'Failed',
+    synced: 'Tersinkron',
+    pending: 'Menunggu',
+    failed: 'Gagal',
   };
 
   return (
@@ -33,6 +33,12 @@ export function SyncBadge({ status }: { status: SyncStatus }) {
   );
 }
 
+export const ROLE_LABELS: Record<string, string> = {
+  user: 'Pengguna',
+  admin: 'Administrator',
+  superadmin: 'Administrator Utama',
+};
+
 export function RoleBadge({ role }: { role: string }) {
   const styles: Record<string, string> = {
     user: 'bg-slate-100 text-slate-700',
@@ -40,7 +46,7 @@ export function RoleBadge({ role }: { role: string }) {
     superadmin: 'bg-purple-100 text-purple-800',
   };
 
-  return <span className={`badge ${styles[role] ?? styles.user}`}>{role}</span>;
+  return <span className={`badge ${styles[role] ?? styles.user}`}>{ROLE_LABELS[role] ?? 'Peran tidak dikenal'}</span>;
 }
 
 export function StatusBadge({ status }: { status: string }) {
@@ -50,5 +56,11 @@ export function StatusBadge({ status }: { status: string }) {
     rejected: 'bg-red-100 text-red-800',
   };
 
-  return <span className={`badge ${styles[status] ?? 'bg-slate-100 text-slate-700'}`}>{status}</span>;
+  const labels: Record<string, string> = {
+    pending: 'Menunggu persetujuan',
+    approved: 'Disetujui',
+    rejected: 'Ditolak',
+  };
+
+  return <span className={`badge ${styles[status] ?? 'bg-slate-100 text-slate-700'}`}>{labels[status] ?? 'Status tidak dikenal'}</span>;
 }

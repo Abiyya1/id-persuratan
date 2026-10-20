@@ -22,6 +22,9 @@ const env = Object.fromEntries(
       return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^"|"$/g, '')];
     }),
 );
+for (const name of Object.keys(env)) {
+  if (process.env[name] !== undefined) env[name] = process.env[name];
+}
 
 const key = new TextEncoder().encode(env.SESSION_SECRET);
 
@@ -44,6 +47,7 @@ const tokens = {
   pending: await mint('user', 'pending'),
 };
 
+
 const J = { 'Content-Type': 'application/json' };
 
 let pass = 0;
@@ -52,7 +56,7 @@ let fail = 0;
 async function probe(label, path, token, opts = {}, expected) {
   const r = await fetch(base + path, {
     ...opts,
-    headers: { ...J, ...(token ? { Cookie: `dlms_session=${token}` } : {}), ...(opts.headers ?? {}) },
+    headers: { ...J, ...(token ? { Cookie: `dlms_session=${token}` } : {}), ...opts.headers },
     redirect: 'manual',
   });
   const body = (await r.text()).slice(0, 110);
@@ -72,18 +76,38 @@ await probe('ghost user -> list', '/api/documents/list', tokens.user, {}, 401);
 await probe('ghost admin -> list', '/api/documents/list', tokens.admin, {}, 401);
 await probe('ghost admin -> resync', '/api/documents/resync', tokens.admin,
   { method: 'POST', body: JSON.stringify({ id: 1 }) }, 401);
-await probe('ghost super -> users', '/api/superadmin/users', tokens.superadmin, {}, 401);
+await probe('ghost super -> users', '/api/admin/users', tokens.superadmin, {}, 401);
+await probe('ghost admin -> users', '/api/admin/users', tokens.admin, {}, 401);
+for (const token of [tokens.admin, tokens.superadmin]) {
+  await probe('ghost -> decide registration', '/api/admin/users', token,
+    { method: 'PATCH', body: JSON.stringify({ userId: GHOST, status: 'approved' }) }, 401);
+}
 await probe('ghost super -> audit', '/api/audit/list', tokens.superadmin, {}, 401);
-await probe('ghost user -> export', '/api/documents/export', tokens.user, {}, 401);
 await probe('ghost user -> profile', '/api/profile/update', tokens.user,
   { method: 'PATCH', body: JSON.stringify({ username: 'newname' }) }, 401);
+await probe('ghost user -> options', '/api/documents/options', tokens.user, {}, 401);
+await probe('ghost admin -> add satker', '/api/satkers', tokens.admin,
+  { method: 'POST', body: JSON.stringify({ name: 'Ghost Satker' }) }, 401);
+for (const [role, token] of Object.entries(tokens)) {
+  await probe(`ghost ${role} -> sheet`, '/api/register/sheet?month=8', token, {}, 401);
+  await probe(`ghost ${role} -> update`, '/api/documents/update', token,
+    { method: 'PATCH', body: JSON.stringify({ id: 1, title: 'Must not change' }) }, 401);
+  await probe(`ghost ${role} -> delete`, '/api/documents/delete', token,
+    { method: 'DELETE', body: JSON.stringify({ id: 1 }) }, 401);
+  await probe(`ghost ${role} -> resync one`, '/api/documents/resync', token,
+    { method: 'POST', body: JSON.stringify({ id: 1 }) }, 401);
+  await probe(`ghost ${role} -> resync batch`, '/api/documents/resync', token,
+    { method: 'POST', body: JSON.stringify({ batch: true }) }, 401);
+  await probe(`ghost ${role} -> queue`, '/api/documents/resync', token, {}, 401);
+}
 
 console.log('\n-- No token at all --');
 for (const [label, path] of [
   ['anon -> list', '/api/documents/list'],
-  ['anon -> export', '/api/documents/export'],
+  ['anon -> options', '/api/documents/options'],
+  ['anon -> sheet', '/api/register/sheet?month=8'],
   ['anon -> audit', '/api/audit/list'],
-  ['anon -> users', '/api/superadmin/users'],
+  ['anon -> users', '/api/admin/users'],
   ['anon -> resync GET', '/api/documents/resync'],
 ]) {
   await probe(label, path, null, {}, 401);
@@ -93,6 +117,8 @@ console.log('\n-- Malformed tokens --');
 await probe('garbage token', '/api/documents/list', 'not.a.jwt', {}, 401);
 await probe('empty token', '/api/documents/list', '', {}, 401);
 
+await probe('anon -> delete', '/api/documents/delete', null,
+  { method: 'DELETE', body: JSON.stringify({ id: 1 }) }, 401);
 console.log('\n-- Cron secret --');
 await probe('cron, no header', '/api/cron/resync', null, {}, 401);
 await probe('cron, wrong secret', '/api/cron/resync', null,
@@ -108,6 +134,8 @@ for (const [label, path, method] of [
   ['POST on list', '/api/documents/list', 'POST'],
   ['POST on cron', '/api/cron/resync', 'POST'],
   ['GET on logout', '/api/auth/logout', 'GET'],
+  ['POST on sheet', '/api/register/sheet?month=8', 'POST'],
+  ['GET on delete', '/api/documents/delete', 'GET'],
 ]) {
   await probe(label, path, tokens.admin, { method }, 405);
 }

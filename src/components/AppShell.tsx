@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useState, type ReactNode } from 'react';
 import type { Role } from '@/lib/supabase';
+import { ROLE_LABELS } from './Badges';
 
 export interface ShellUser {
   username: string;
@@ -13,15 +14,17 @@ export interface ShellUser {
 /**
  * Nav entries in render order, filtered by role.
  *
- * `user` accounts get "My Documents" (/dashboard) because that is the only
- * portal they can reach -- /admin redirects them via middleware. Admins get
- * the management sections instead.
+ * All approved roles can create and search letters and read the shared register.
  */
 const NAV_ITEMS: Array<{ href: string; label: string; roles: Role[] }> = [
-  { href: '/dashboard', label: 'My Documents', roles: ['user'] },
-  { href: '/admin', label: 'Documents', roles: ['admin', 'superadmin'] },
-  { href: '/admin/users', label: 'User Management', roles: ['superadmin'] },
-  { href: '/admin/audit', label: 'Audit Log', roles: ['admin', 'superadmin'] },
+  { href: '/dashboard', label: 'Buat Nomor Surat', roles: ['user'] },
+  { href: '/admin', label: 'Buat Nomor Surat', roles: ['admin', 'superadmin'] },
+  { href: '/documents', label: 'Cari Surat', roles: ['user', 'admin', 'superadmin'] },
+  { href: '/register-sheet', label: 'Register Surat', roles: ['user', 'admin', 'superadmin'] },
+  { href: '/admin/register-settings', label: 'Pengaturan Nomor Surat', roles: ['admin', 'superadmin'] },
+  { href: '/admin/users', label: 'Permintaan Akses', roles: ['admin'] },
+  { href: '/admin/users', label: 'Kelola Pengguna', roles: ['superadmin'] },
+  { href: '/admin/audit', label: 'Riwayat Audit', roles: ['admin', 'superadmin'] },
 ];
 
 /** Person silhouette. Inline SVG avoids an icon dependency for one glyph. */
@@ -89,20 +92,20 @@ export function AppShell({
   }, [router]);
 
   return (
-    <div className="flex min-h-screen bg-slate-100">
+    <div className="flex min-h-screen flex-col bg-slate-100 md:flex-row">
       {/* ---- Sidebar ------------------------------------------------- */}
-      <aside className="sticky top-0 flex h-screen w-64 shrink-0 flex-col border-r border-slate-200 bg-white">
-        <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-4">
+      <aside className="flex h-auto w-full shrink-0 flex-col border-b border-slate-200 bg-white md:sticky md:top-0 md:h-screen md:w-64 md:border-b-0 md:border-r">
+        <div className="flex h-16 shrink-0 items-center gap-2 border-b border-slate-200 px-4">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-navy-700 text-xs font-bold text-white">
             ID
           </span>
-          <span className="text-sm font-semibold text-navy-900">Document ID Manager</span>
+          <span className="text-sm font-semibold text-navy-900">Pengelola Nomor Surat</span>
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto p-3" aria-label="Main">
+        <nav className="flex flex-wrap gap-1 p-3 md:block md:flex-1 md:space-y-1 md:overflow-y-auto" aria-label="Navigasi utama">
           {items.map((item) => {
             // Exact match for index routes, prefix for sections. Without the
-            // exact check, /admin/users would also highlight "Documents".
+            // exact check, /admin/users would also highlight "Buat Nomor Surat".
             const active = item.href === '/admin'
               ? pathname === '/admin'
               : item.href === '/dashboard'
@@ -131,11 +134,11 @@ export function AppShell({
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Identity row: unchanged from the old topbar except for the icon
             and the red Sign out button. */}
-        <div className="sticky top-0 z-10 flex items-center justify-end gap-3 border-b border-slate-200 bg-white px-6 py-3">
+        <div className="sticky top-0 z-10 flex h-16 shrink-0 items-center justify-end gap-3 border-b border-slate-200 bg-white px-4 sm:px-6">
           <Link
             href="/profile"
-            title="Profile"
-            aria-label="Profile"
+            title="Profil"
+            aria-label="Profil"
             aria-current={pathname.startsWith('/profile') ? 'page' : undefined}
             className={`rounded-md p-2 transition-colors ${
               pathname.startsWith('/profile')
@@ -148,7 +151,7 @@ export function AppShell({
 
           <div className="text-right">
             <p className="text-sm font-medium leading-tight text-slate-900">{user.username}</p>
-            <p className="text-xs capitalize leading-tight text-slate-500">{user.role}</p>
+            <p className="text-xs leading-tight text-slate-500">{ROLE_LABELS[user.role]}</p>
           </div>
 
           <button
@@ -157,11 +160,11 @@ export function AppShell({
             disabled={signingOut}
             className="btn-danger"
           >
-            {signingOut ? 'Signing out...' : 'Sign out'}
+            {signingOut ? 'Sedang keluar...' : 'Keluar'}
           </button>
         </div>
 
-        <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-8">{children}</main>
+        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-8">{children}</main>
       </div>
     </div>
   );

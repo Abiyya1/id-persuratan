@@ -14,19 +14,19 @@ export default function HomePage() {
           </div>
 
           <h1 className="text-3xl font-bold tracking-tight text-navy-900 sm:text-4xl">
-            Document Labeling &amp; ID Management
+            Pengelola Nomor Surat
           </h1>
 
           <p className="mt-3 text-base leading-relaxed text-slate-600">
-            Atomic, duplicate-proof document numbering with automatic Google Sheets
-            synchronization and a self-healing retry queue.
+            Penomoran surat tanpa duplikasi dengan sinkronisasi Google Sheets
+            otomatis dan antrean percobaan ulang yang pulih secara otomatis.
           </p>
 
           <dl className="mt-8 grid gap-4 sm:grid-cols-3">
             {[
-              { k: 'Zero duplicates', v: 'Row-locked counter, not a max()+1 guess.' },
-              { k: 'Never loses data', v: 'A Sheets outage costs a sync, never a document.' },
-              { k: 'Self-healing', v: 'Failed rows retry every 5 minutes.' },
+              { k: 'Tanpa duplikasi', v: 'Penghitung dengan penguncian baris, bukan perkiraan max()+1.' },
+              { k: 'Data tetap tersimpan', v: 'Gangguan Google Sheets hanya menunda sinkronisasi, bukan menghilangkan surat.' },
+              { k: 'Pemulihan otomatis', v: 'Baris yang gagal dicoba kembali setiap 5 menit.' },
             ].map((item) => (
               <div key={item.k} className="rounded-lg bg-slate-50 p-4">
                 <dt className="text-sm font-semibold text-navy-800">{item.k}</dt>
@@ -37,15 +37,15 @@ export default function HomePage() {
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link href="/login" className="btn-primary flex-1">
-              Sign in
+              Masuk
             </Link>
             <Link href="/register" className="btn-secondary flex-1">
-              Request an account
+              Ajukan akun
             </Link>
           </div>
 
           <p className="mt-6 border-t border-slate-200 pt-4 text-xs text-slate-500">
-            New registrations are held for Superadmin approval before they can sign in.
+            Pendaftaran baru memerlukan persetujuan administrator sebelum akun dapat digunakan untuk masuk.
           </p>
         </div>
       </div>

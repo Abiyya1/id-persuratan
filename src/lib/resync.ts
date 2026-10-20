@@ -1,169 +1,166 @@
 import { getSupabaseAdmin, type DocumentRow } from '@/lib/supabase';
-import { appendDocumentRow, describeSheetsError } from '@/lib/google-sheets';
-
-/**
- * Shared retry engine for the Google Sheets sync queue.
- *
- * Used by both the manual "Re-sync" button and the Vercel cron job, so the
- * two can never drift apart in behaviour.
- */
+import { syncDocumentRow, syncRegisterMonth, describeSheetsError, sheetsUserMessage } from '@/lib/google-sheets';
 
 export interface SyncOutcome {
   documentId: number;
   ok: boolean;
   error?: string;
+  code?: 'LEGACY_READ_ONLY';
   attempts: number;
+  statusPersisted: boolean;
+  document?: DocumentRow;
 }
 
 export interface RetryOptions {
-  /** Limit how many rows one pass touches. Keeps cron invocations short. */
+  /** Limit how many unsynced rows one pass touches. */
   batchSize?: number;
-  /** Only retry rows that have not been attempted recently. */
-  onlyFailed?: boolean;
+  /** Omit only for administrator/cron operations. */
+  createdBy?: string;
 }
 
 const DEFAULT_BATCH_SIZE = 25;
 
-/** Retry a single document. Never throws -- always reports the outcome. */
-async function syncOne(doc: DocumentRow): Promise<SyncOutcome> {
-  const supabase = getSupabaseAdmin();
-
-  // Resolve the creator name for the sheet's "Created By" column.
-  let creatorName: string | null = null;
-  if (doc.created_by) {
-    const { data } = await supabase
-      .from('users')
-      .select('username')
-      .eq('id', doc.created_by)
-      .maybeSingle<{ username: string }>();
-    creatorName = data?.username ?? null;
-  }
-
-  let ok = true;
-  let error: string | undefined;
-
-  try {
-    await appendDocumentRow(doc, creatorName);
-  } catch (err) {
-    ok = false;
-    error = describeSheetsError(err);
-    console.error(`[resync] document ${doc.id} failed:`, error);
-  }
-
-  // Atomic increment -- the cron and a manual click can race here.
-  const { error: rpcError } = await supabase.rpc(
-    'bump_sync_attempts_and_set_status',
-    {
-      p_document_id: doc.id,
-      p_status: ok ? 'synced' : 'failed',
-      p_error: ok ? null : (error ?? 'Unknown sync error'),
-    },
-  );
-
-  if (rpcError) {
-    // The helper RPC is missing (schema.sql predates it). Fall back to a
-    // direct write so retries still record their result.
-    console.warn('[resync] bump RPC failed, using fallback:', rpcError.message);
-    await supabase
-      .from('documents')
-      .update({
-        sync_status: ok ? 'synced' : 'failed',
-        last_sync_error: ok ? null : (error ?? 'Unknown sync error'),
-        sync_attempts: (doc.sync_attempts ?? 0) + 1,
-      })
-      .eq('id', doc.id);
-
+/** Synchronize the saved version, then persist the result without overwriting a newer edit. */
+export async function syncDocument(doc: DocumentRow): Promise<SyncOutcome> {
+  if (!doc.letter_date) {
     return {
       documentId: doc.id,
-      ok,
-      error,
-      attempts: (doc.sync_attempts ?? 0) + 1,
+      ok: false,
+      code: 'LEGACY_READ_ONLY',
+      error: 'Arsip lama berada di luar register bulanan dan tidak dapat disinkronkan ulang.',
+      attempts: doc.sync_attempts,
+      statusPersisted: false,
     };
   }
-
-  return { documentId: doc.id, ok, error, attempts: (doc.sync_attempts ?? 0) + 1 };
-}
-
-/** Retry a single document by ID. Returns null when it does not exist. */
-export async function resyncDocumentById(id: number): Promise<SyncOutcome | null> {
   const supabase = getSupabaseAdmin();
-
-  const { data, error } = await supabase
-    .from('documents')
-    .select('*')
-    .eq('id', id)
-    .maybeSingle<DocumentRow>();
-
-  if (error) {
-    console.error(`[resync] fetch of ${id} failed:`, error.message);
-    return null;
+  let ok = true;
+  let error: string | undefined;
+  let persistedDocument: DocumentRow;
+  try {
+    await syncDocumentRow(doc);
+  } catch (err) {
+    ok = false;
+    error = sheetsUserMessage(err);
+    console.error(`[resync] document ${doc.id} failed:`, describeSheetsError(err));
   }
 
+  try {
+    const { data, error: rpcError } = await supabase.rpc('bump_sync_attempts_and_set_status', {
+      p_document_id: doc.id,
+      p_status: ok ? 'synced' : 'failed',
+      p_error: ok ? null : (error ?? 'Sinkronisasi gagal tanpa rincian kesalahan.'),
+      p_expected_updated_at: doc.updated_at,
+    });
+    if (rpcError) {
+      console.error('[resync] status persistence failed:', rpcError.message);
+      throw new Error('Tidak dapat menyimpan status sinkronisasi.');
+    }
+    if (!data) throw new Error('Surat berubah saat sinkronisasi berlangsung; versi terbaru tetap dalam antrean.');
+    persistedDocument = data as DocumentRow;
+    if (persistedDocument.id !== doc.id || typeof persistedDocument.sync_attempts !== 'number') {
+      throw new Error('Hasil penyimpanan status sinkronisasi tidak valid.');
+    }
+  } catch (err) {
+    const persistenceError = err instanceof Error ? err.message : 'Tidak dapat menyimpan status sinkronisasi.';
+    console.error(`[resync] status for document ${doc.id} failed:`, persistenceError);
+    return {
+      documentId: doc.id,
+      ok: false,
+      error: error ? `${error} ${persistenceError}` : persistenceError,
+      attempts: doc.sync_attempts,
+      statusPersisted: false,
+    };
+  }
+  return {
+    documentId: doc.id,
+    ok,
+    error,
+    attempts: persistedDocument.sync_attempts,
+    statusPersisted: true,
+    document: persistedDocument,
+  };
+}
+
+/** Private numeric addressing is distinct from the official string number. */
+export async function resyncDocumentById(id: number, createdBy?: string): Promise<SyncOutcome | null> {
+  let query = getSupabaseAdmin().from('documents').select('*').eq('id', id);
+  if (createdBy) query = query.eq('created_by', createdBy);
+  const { data, error } = await query.maybeSingle<DocumentRow>();
+  if (error) {
+    console.error('[resync] document query failed:', error.message);
+    throw new Error('Tidak dapat memuat surat untuk sinkronisasi.');
+  }
   if (!data) return null;
-  return syncOne(data);
+  return syncDocument(data);
 }
 
-/**
- * Retry every unsynced document.
- *
- * Ordered oldest-first by last attempt so a document that has been failing
- * repeatedly is not starved by newer traffic.
- */
-export async function retryFailedDocuments(
-  options: RetryOptions = {},
-): Promise<SyncOutcome[]> {
-  const { batchSize = DEFAULT_BATCH_SIZE, onlyFailed = true } = options;
-  const supabase = getSupabaseAdmin();
-
-  let query = supabase
-    .from('documents')
-    .select('*')
-    .order('created_at', { ascending: true })
-    .limit(batchSize);
-
-  if (onlyFailed) {
-    query = query.eq('sync_status', 'failed');
-  }
-
-  const { data, error } = await query;
-
+/** Retry both pending creates/edits and failed synchronization attempts. */
+export async function retryFailedDocuments(options: RetryOptions = {}): Promise<SyncOutcome[]> {
+  const { batchSize = DEFAULT_BATCH_SIZE, createdBy } = options;
+  let query = getSupabaseAdmin().from('documents').select('*')
+    .not('letter_date', 'is', null).in('sync_status', ['pending', 'failed']);
+  if (createdBy) query = query.eq('created_by', createdBy);
+  const { data, error } = await query.order('updated_at', { ascending: true }).limit(batchSize);
   if (error) {
-    console.error('[resync] batch query failed:', error.message);
-    return [];
+    console.error('[resync] queue query failed:', error.message);
+    throw new Error('Tidak dapat memuat antrean sinkronisasi.');
   }
 
-  const docs = (data ?? []) as DocumentRow[];
-
-  // Sequential, not Promise.all. Google Sheets has per-spreadsheet rate
-  // limits, and a burst of parallel appends is the fastest way to get 429s and
-  // mark a batch failed for no real reason.
+  // Sequential projection respects the per-spreadsheet quota and the Sheets lease.
   const outcomes: SyncOutcome[] = [];
-  for (const doc of docs) {
-    outcomes.push(await syncOne(doc));
+  for (const doc of (data ?? []) as DocumentRow[]) {
+    outcomes.push(await syncDocument(doc));
   }
-
   return outcomes;
 }
 
-/** Count of documents still awaiting sync. Used for dashboard badges. */
-export async function countUnsynced(): Promise<{ failed: number; pending: number }> {
+/** Retry deleted letters through the same month writer, including months with no documents left. */
+export async function retryPendingDeletions(createdBy?: string): Promise<{ month: number; ok: boolean; error?: string }[]> {
+  const months = new Set<number>();
+  for (let offset = 0; ; offset += 1000) {
+    let query = getSupabaseAdmin().from('letter_slots').select('letter_date')
+      .eq('release_pending', true).order('number');
+    if (createdBy) query = query.eq('release_requested_by', createdBy);
+    const { data, error } = await query.range(offset, offset + 999);
+    if (error) {
+      console.error('[resync] deletion queue failed:', error.message);
+      throw new Error('Tidak dapat memuat antrean penghapusan surat.');
+    }
+    for (const slot of data ?? []) months.add(Number(slot.letter_date.slice(5, 7)));
+    if ((data?.length ?? 0) < 1000) break;
+  }
+  const outcomes: { month: number; ok: boolean; error?: string }[] = [];
+  for (const month of [...months].sort((a, b) => a - b)) {
+    try {
+      await syncRegisterMonth(month);
+      outcomes.push({ month, ok: true });
+    } catch (err) {
+      const error = sheetsUserMessage(err);
+      console.error(`[resync] pending deletion month ${month} failed:`, describeSheetsError(err));
+      outcomes.push({ month, ok: false, error });
+    }
+  }
+  return outcomes;
+}
+
+/** All queue counts are scoped to the actor; cron/admin omit createdBy. */
+export async function countUnsynced(createdBy?: string): Promise<{ failed: number; pending: number; deleting: number }> {
   const supabase = getSupabaseAdmin();
-
-  // head:true makes Postgres return only the count -- no rows transferred.
-  // Two tiny aggregate queries beat one full table scan.
-  const [failed, pending] = await Promise.all([
-    supabase
-      .from('documents')
-      .select('id', { count: 'exact', head: true })
-      .eq('sync_status', 'failed'),
-    supabase
-      .from('documents')
-      .select('id', { count: 'exact', head: true })
-      .eq('sync_status', 'pending'),
-  ]);
-
-  return {
-    failed: failed.count ?? 0,
-    pending: pending.count ?? 0,
-  };
+  let failedQuery = supabase.from('documents').select('id', { count: 'exact', head: true })
+    .not('letter_date', 'is', null).eq('sync_status', 'failed');
+  let pendingQuery = supabase.from('documents').select('id', { count: 'exact', head: true })
+    .not('letter_date', 'is', null).eq('sync_status', 'pending');
+  let deletingQuery = supabase.from('letter_slots').select('number', { count: 'exact', head: true })
+    .eq('release_pending', true);
+  if (createdBy) {
+    failedQuery = failedQuery.eq('created_by', createdBy);
+    pendingQuery = pendingQuery.eq('created_by', createdBy);
+    deletingQuery = deletingQuery.eq('release_requested_by', createdBy);
+  }
+  const [failed, pending, deleting] = await Promise.all([failedQuery, pendingQuery, deletingQuery]);
+  if (failed.error || pending.error || deleting.error) {
+    console.error('[resync] queue count failed:', failed.error?.message ?? pending.error?.message ?? deleting.error?.message);
+    throw new Error('Tidak dapat menghitung antrean sinkronisasi.');
+  }
+  return { failed: failed.count ?? 0, pending: pending.count ?? 0, deleting: deleting.count ?? 0 };
 }

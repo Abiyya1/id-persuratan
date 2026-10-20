@@ -22,13 +22,13 @@ const MAX_BODY_BYTES = 16 * 1024;
 export async function POST(req: Request) {
   return handleRoute(async () => {
     const body = await readBody(req);
-    if (!body) return jsonError('Invalid request body.', 400);
+    if (!body) return jsonError('Isi permintaan tidak valid.', 400);
 
     const username = typeof body.username === 'string' ? body.username.trim() : '';
     const password = typeof body.password === 'string' ? body.password : '';
 
     if (!username || !password) {
-      return jsonError('Invalid username or password.', 401);
+      return jsonError('Nama pengguna atau kata sandi salah.', 401);
     }
 
     const supabase = getSupabaseAdmin();
@@ -41,14 +41,14 @@ export async function POST(req: Request) {
 
     if (error) {
       console.error('[login] lookup failed:', error.message);
-      return jsonError('Login is temporarily unavailable.', 500);
+      return jsonError('Layanan masuk untuk sementara tidak tersedia.', 500);
     }
 
     if (!data) {
       // Spend roughly the same time as a real bcrypt compare so response
       // timing does not reveal whether the username exists.
       await verifyPassword(password, '$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidin');
-      return jsonError('Invalid username or password.', 401);
+      return jsonError('Nama pengguna atau kata sandi salah.', 401);
     }
 
     const valid = await verifyPassword(password, data.password_hash);
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
         targetId: data.id,
         details: { outcome: 'failed_bad_password' },
       });
-      return jsonError('Invalid username or password.', 401);
+      return jsonError('Nama pengguna atau kata sandi salah.', 401);
     }
 
     // ---- Status gates --------------------------------------------------------
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
         targetId: data.id,
         details: { outcome: 'blocked_rejected' },
       });
-      return jsonError('Your account has been rejected. Contact the administrator.', 403);
+      return jsonError('Akun Anda ditolak. Hubungi administrator.', 403);
     }
 
     // ---- Approved: mint the session ------------------------------------------
@@ -99,7 +99,7 @@ export async function POST(req: Request) {
     });
 
     return Response.json({
-      message: 'Signed in.',
+      message: 'Berhasil masuk.',
       user: { id: data.id, username: data.username, role: data.role },
       // The client uses this to pick the portal without another round trip.
       redirectTo: data.role === 'user' ? '/dashboard' : '/admin',

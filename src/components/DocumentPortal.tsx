@@ -1,126 +1,132 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { SyncBadge } from './Badges';
-import type { DocumentRow, SyncStatus } from '@/lib/supabase';
+import { ClassificationInput, useRegisterOptions } from './ClassificationInput';
+import { KET_OPTIONS, MONTH_NAMES } from '@/lib/letter-fields';
 
-/**
- * Dashboard 1 body: the create form plus the submitter's own document list.
- *
- * Documents are fetched client-side against createdBy=<own id>. The server
- * stamps created_by from the session, so a user cannot file a document under
- * someone else's name by tampering with the request.
- */
-export function DocumentPortal({
-  userId,
-  username,
-  initialDocuments,
-}: {
-  userId: string;
-  username: string;
-  initialDocuments: DocumentRow[];
-}) {
+export function DocumentPortal({ canManage }: { canManage: boolean }) {
   const router = useRouter();
-
-  const [title, setTitle] = useState('');
-  const [metadataKey, setMetadataKey] = useState('');
-  const [metadataValue, setMetadataValue] = useState('');
-
+  const { options, error: optionsError, loading: optionsLoading, reload: reloadOptions } = useRegisterOptions();
+  const [kdSurat, setKdSurat] = useState('');
+  const [kdSatker, setKdSatker] = useState('');
+  const [hal, setHal] = useState('');
+  const [tujuanSurat, setTujuanSurat] = useState('');
+  const [ket, setKet] = useState('');
+  const [date, setDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState<{
-    kind: 'success' | 'error';
-    message: string;
-    warning?: string | null;
-  } | null>(null);
-
-  const [documents, setDocuments] = useState<DocumentRow[]>(initialDocuments);
-  const [loading, setLoading] = useState(true);
-
-  const loadDocuments = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/documents/list?createdBy=${userId}&pageSize=25`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setDocuments(data.documents ?? []);
-    } catch {
-      // A failed refresh should not wipe the table the user is looking at.
-    } finally {
-      setLoading(false);
-    }
-  }, [userId]);
+  const [fullDate, setFullDate] = useState<string | null>(null);
+  const [emergencyConfirmed, setEmergencyConfirmed] = useState(false);
+  const [emergencyReason, setEmergencyReason] = useState('');
+  const [satkerName, setSatkerName] = useState('');
+  const [addingSatker, setAddingSatker] = useState(false);
+  const [catalogFeedback, setCatalogFeedback] = useState<{ error: boolean; message: string } | null>(null);
+  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; message: string; warning?: string | null } | null>(null);
+  const month = date ? Number(date.slice(5, 7)) : '';
+  const emergencyAvailable = canManage && fullDate === date;
+  const ketOptions = date === options?.today ? KET_OPTIONS : ['MANUAL'] as const;
 
   useEffect(() => {
-    void loadDocuments();
-  }, [loadDocuments]);
+    if (!options) return;
+    setDate((current) => current || options.today);
+  }, [options]);
 
-  // Poll while this tab is focused. A new document's sync status changes
-  // server-side (pending -> synced/failed), and without this the badge would
-  // stay frozen at whatever it was when the row was created.
-  useEffect(() => {
-    function onVisibility() {
-      if (document.visibilityState === 'visible') void loadDocuments();
-    }
-
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void loadDocuments();
-    }, 15_000);
-
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, [loadDocuments]);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  function changeDate(next: string) {
+    setDate(next);
+    setKet('');
+    setFullDate(null);
+    setEmergencyConfirmed(false);
+    setEmergencyReason('');
     setFeedback(null);
+  }
 
-    const cleanTitle = title.trim();
-    if (!cleanTitle) {
-      setFeedback({ kind: 'error', message: 'Title is required.' });
+  function changeMonth(next: number) {
+    const day = Math.min(Number(date.slice(8, 10)) || 1, new Date(Date.UTC(2026, next, 0)).getUTCDate());
+    changeDate(`2026-${String(next).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+  }
+
+
+  async function addSatker() {
+    setCatalogFeedback(null);
+    if (!satkerName.trim()) {
+      setCatalogFeedback({ error: true, message: 'Nama satker wajib diisi.' });
       return;
     }
-
-    // Metadata is free-form; only include the pair when a key was given, so a
-    // stray value in the second box does not create a blank key.
-    const metadata: Record<string, string> = {};
-    const cleanKey = metadataKey.trim();
-    if (cleanKey) metadata[cleanKey] = metadataValue.trim();
-
-    setSubmitting(true);
-
+    setAddingSatker(true);
     try {
-      const res = await fetch('/api/documents/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: cleanTitle, metadata }),
+      const response = await fetch('/api/satkers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: satkerName.trim() }),
       });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? 'Tidak dapat menambah satker.');
+      setSatkerName('');
+      const refreshed = await reloadOptions();
+      setCatalogFeedback({ error: !refreshed, message: refreshed ? 'Satker ditambahkan dan katalog diperbarui.' : 'Satker ditambahkan, tetapi katalog gagal dimuat ulang. Coba muat ulang katalog.' });
+    } catch (cause) {
+      setCatalogFeedback({ error: true, message: cause instanceof Error ? cause.message : 'Tidak dapat menghubungi server.' });
+    } finally {
+      setAddingSatker(false);
+    }
+  }
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setFeedback({ kind: 'error', message: data.error ?? 'Could not create document.' });
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setFeedback(null);
+    if (!options || optionsError || optionsLoading || !options.classifications.some((item) => item.code === kdSurat) || !options.satkers.some((item) => item.name === kdSatker)) {
+      setFeedback({ kind: 'error', message: 'Pilih KD Surat dan KD Satker yang terdaftar dari katalog yang berhasil dimuat.' });
+      return;
+    }
+    if (!/^2026-\d{2}-\d{2}$/.test(date) || !hal.trim()) {
+      setFeedback({ kind: 'error', message: 'Isi Perihal Surat dan pilih tanggal tahun 2026. Tahun lain belum didukung.' });
+      return;
+    }
+    if (!tujuanSurat.trim()) {
+      setFeedback({ kind: 'error', message: 'Tujuan Surat wajib diisi.' });
+      return;
+    }
+    if (!ketOptions.some((item) => item === ket)) {
+      setFeedback({ kind: 'error', message: date === options.today ? 'Pilih keterangan surat.' : 'Untuk tanggal selain hari ini (WIB), pilih Keterangan MANUAL.' });
+      return;
+    }
+    const emergency = emergencyAvailable && emergencyConfirmed;
+    if (emergencyAvailable && !emergency) {
+      setFeedback({ kind: 'error', message: 'Konfirmasikan penggunaan nomor darurat atau pilih tanggal lain.' });
+      return;
+    }
+    if (emergency && !emergencyReason.trim()) {
+      setFeedback({ kind: 'error', message: 'Alasan nomor darurat wajib diisi.' });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const response = await fetch('/api/documents/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kdSurat, kdSatker, hal: hal.trim(), tujuanSurat: tujuanSurat.trim(), ket, date, month, ...(emergency ? { emergency: true, emergencyReason: emergencyReason.trim() } : {}) }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (response.status === 409 && data.code === 'DAY_FULL') {
+          setFullDate(date);
+          setEmergencyConfirmed(false);
+          setFeedback({ kind: 'error', message: canManage ? 'Slot tanggal ini habis. Nomor darurat hanya dapat dibuat setelah konfirmasi dan pengisian alasan di bawah.' : 'Slot tanggal ini habis. Hubungi admin untuk permintaan nomor darurat; nomor tidak dialokasikan otomatis.' });
+        } else {
+          setFeedback({ kind: 'error', message: data.error ?? 'Tidak dapat mendaftarkan surat.' });
+        }
         return;
       }
-
-      setFeedback({
-        kind: 'success',
-        message: data.message,
-        warning: data.syncWarning,
-      });
-
-      // Clear the form so the next submission starts clean. The ID is already
-      // allocated server-side -- clearing does not release it.
-      setTitle('');
-      setMetadataKey('');
-      setMetadataValue('');
-
-      await loadDocuments();
+      const allocatedNumber = String(data.document.surat_number);
+      setFeedback({ kind: 'success', message: `Surat terdaftar dengan Nomor Surat ${allocatedNumber}. ${data.message ?? ''}`, warning: data.syncWarning });
+      setHal('');
+      setTujuanSurat('');
+      setKdSatker('');
+      setKet('');
+      setFullDate(null);
+      setEmergencyConfirmed(false);
+      setEmergencyReason('');
       router.refresh();
     } catch {
-      setFeedback({ kind: 'error', message: 'Could not reach the server.' });
+      setFeedback({ kind: 'error', message: 'Tidak dapat menghubungi server. Periksa daftar surat sebelum mencoba kembali untuk menghindari pengajuan ganda.' });
     } finally {
       setSubmitting(false);
     }
@@ -128,146 +134,32 @@ export function DocumentPortal({
 
   return (
     <div className="space-y-6">
-      {/* ---- Create form ------------------------------------------------- */}
       <section className="card p-6">
-        <h2 className="text-lg font-semibold text-navy-900">New document</h2>
-
-        {feedback && (
-          <div
-            role="status"
-            className={`mt-4 rounded-md border p-3 text-sm ${
-              feedback.kind === 'success'
-                ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
-                : 'border-red-300 bg-red-50 text-red-800'
-            }`}
-          >
-            <p className="font-medium">{feedback.message}</p>
-            {feedback.warning && (
-              <p className="mt-1 text-xs opacity-80">Sheets said: {feedback.warning}</p>
-            )}
-          </div>
-        )}
-
+        <h2 className="text-lg font-semibold text-navy-900">Buat Nomor Surat</h2>
+        <p className="mt-1 text-sm text-slate-500">Register bulanan 2026 · tanggal mengikuti WIB · nomor ditetapkan saat surat disimpan.</p>
+        {optionsError && <div role="alert" className="mt-4 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800"><p>{optionsError}</p><button type="button" className="btn-secondary btn-sm mt-2" disabled={optionsLoading} onClick={() => void reloadOptions()}>Muat ulang katalog</button></div>}
+        {optionsLoading && <p role="status" className="mt-3 text-sm text-slate-500">Memuat klasifikasi, satker, dan tanggal server…</p>}
+        {feedback && <div role={feedback.kind === 'error' ? 'alert' : 'status'} className={`mt-4 rounded-md border p-3 text-sm ${feedback.kind === 'success' ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-red-300 bg-red-50 text-red-800'}`}><p className="font-medium">{feedback.message}</p>{feedback.warning && <p className="mt-1 text-xs">Sinkronisasi Sheets: {feedback.warning}</p>}</div>}
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-          <div>
-            <label htmlFor="title" className="label">
-              Title <span className="text-red-500">*</span>
-            </label>
-            <input
-              id="title"
-              type="text"
-              required
-              maxLength={300}
-              autoFocus
-              placeholder="e.g. Surat Izin Usaha"
-              className="input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="meta-key" className="label">
-                Metadata key <span className="font-normal text-slate-400">(optional)</span>
-              </label>
-              <input
-                id="meta-key"
-                type="text"
-                maxLength={100}
-                placeholder="e.g. Applicant"
-                className="input"
-                value={metadataKey}
-                onChange={(e) => setMetadataKey(e.target.value)}
-              />
+          <fieldset disabled={submitting || optionsLoading || !options || !!optionsError} className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <ClassificationInput id="create-kd-surat" options={options?.classifications ?? []} value={kdSurat} onChange={setKdSurat} disabled={submitting || optionsLoading || !options || !!optionsError} />
+              <div><label htmlFor="create-satker" className="label">KD Satker <span className="text-red-500">*</span></label><select id="create-satker" className="input" required value={kdSatker} onChange={(event) => setKdSatker(event.target.value)}><option value="">Pilih satker</option>{options?.satkers.map((satker) => <option key={satker.id} value={satker.name}>{satker.name}</option>)}</select></div>
+              <div><label htmlFor="create-ket" className="label">Keterangan <span className="text-red-500">*</span></label><select id="create-ket" className="input" required value={ket} onChange={(event) => setKet(event.target.value)}><option value="">Pilih Keterangan</option>{ketOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select>{date && date !== options?.today && <p className="mt-1 text-xs text-slate-500">Tanggal selain hari ini hanya dapat menggunakan MANUAL.</p>}</div>
             </div>
-            <div>
-              <label htmlFor="meta-value" className="label">
-                Metadata value
-              </label>
-              <input
-                id="meta-value"
-                type="text"
-                maxLength={500}
-                placeholder="e.g. Budi Santoso"
-                className="input"
-                value={metadataValue}
-                onChange={(e) => setMetadataValue(e.target.value)}
-              />
+            <div><label htmlFor="create-hal" className="label">Perihal Surat <span className="text-red-500">*</span></label><input id="create-hal" className="input" required maxLength={300} value={hal} onChange={(event) => setHal(event.target.value)} /></div>
+            <div><label htmlFor="create-tujuan" className="label">Tujuan Surat <span className="text-red-500">*</span></label><input id="create-tujuan" className="input" required maxLength={500} value={tujuanSurat} onChange={(event) => setTujuanSurat(event.target.value)} /></div>
+            <div className="grid items-end gap-4 sm:grid-cols-3">
+              <div><label htmlFor="create-month" className="label">Bulan</label><select id="create-month" className="input" value={month} required onChange={(event) => changeMonth(Number(event.target.value))}><option value="" disabled>Pilih bulan</option>{MONTH_NAMES.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></div>
+              <div><label htmlFor="create-date" className="label">Tanggal surat (WIB)</label><input id="create-date" className="input" type="date" min="2026-01-01" max="2026-12-31" required value={date} onChange={(event) => changeDate(event.target.value)} /></div>
+              <div><button type="button" className="btn-secondary" onClick={async () => { const current = await reloadOptions(); if (current) changeDate(current.today); }}>HARI INI</button></div>
             </div>
-          </div>
-
-          <button type="submit" disabled={submitting} className="btn-primary">
-            {submitting ? 'Generating ID...' : 'Generate document ID'}
-          </button>
+            {/* <p className="text-xs text-slate-500">Tahun selain 2026 belum didukung.</p> */}
+            {emergencyAvailable && <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3"><label className="flex items-start gap-2 text-sm text-amber-900"><input type="checkbox" className="mt-1" checked={emergencyConfirmed} onChange={(event) => setEmergencyConfirmed(event.target.checked)} />Saya mengonfirmasi penggunaan nomor darurat bersufiks untuk tanggal {date}. Tidak ada alokasi manual.</label><div><label htmlFor="create-emergency-reason" className="label">Alasan nomor darurat</label><textarea id="create-emergency-reason" className="input" required={emergencyConfirmed} maxLength={500} rows={2} value={emergencyReason} onChange={(event) => setEmergencyReason(event.target.value)} /></div></div>}
+            <button type="submit" className="btn-primary" disabled={submitting || !kdSurat || (emergencyAvailable && (!emergencyConfirmed || !emergencyReason.trim())) || (!canManage && fullDate === date)}>{submitting ? 'Mendaftarkan surat…' : emergencyAvailable ? 'Daftarkan dengan nomor darurat' : 'Daftarkan surat'}</button>
+          </fieldset>
         </form>
-      </section>
-
-      {/* ---- Own documents ------------------------------------------------ */}
-      <section className="card overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-navy-900">
-            Submitted by {username}
-          </h2>
-          <button
-            type="button"
-            onClick={() => void loadDocuments()}
-            className="btn-secondary btn-sm"
-          >
-            Refresh
-          </button>
-        </div>
-
-        {loading ? (
-          <p className="px-6 py-8 text-center text-sm text-slate-500">Loading...</p>
-        ) : documents.length === 0 ? (
-          <p className="px-6 py-8 text-center text-sm text-slate-500">
-            You have not submitted any documents yet.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-6 py-3 font-medium">ID</th>
-                  <th className="px-6 py-3 font-medium">Title</th>
-                  <th className="px-6 py-3 font-medium">Metadata</th>
-                  <th className="px-6 py-3 font-medium">Sync</th>
-                  <th className="px-6 py-3 font-medium">Created</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {documents.map((doc) => (
-                  <tr key={doc.id} className="hover:bg-slate-50">
-                    <td className="whitespace-nowrap px-6 py-3 font-mono font-semibold text-navy-800">
-                      {doc.id}
-                    </td>
-                    <td className="px-6 py-3">{doc.title}</td>
-                    <td className="max-w-xs truncate px-6 py-3 text-xs text-slate-500">
-                      {Object.keys(doc.metadata ?? {}).length > 0
-                        ? JSON.stringify(doc.metadata)
-                        : '--'}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3">
-                      <SyncBadge status={doc.sync_status as SyncStatus} />
-                      {doc.sync_status === 'failed' && doc.last_sync_error && (
-                        <p
-                          className="mt-1 max-w-[16rem] truncate text-xs text-red-600"
-                          title={doc.last_sync_error}
-                        >
-                          {doc.last_sync_error}
-                        </p>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3 text-xs text-slate-500">
-                      {new Date(doc.created_at).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {canManage && <div className="mt-6 border-t border-slate-200 pt-4"><h3 className="font-semibold text-navy-900">Tambah KD Satker</h3><div className="mt-2 flex flex-wrap items-end gap-3"><div className="min-w-0 flex-1"><label htmlFor="new-satker" className="label">Nama satker baru</label><input id="new-satker" className="input" maxLength={100} value={satkerName} disabled={addingSatker} onChange={(event) => setSatkerName(event.target.value)} /></div><button type="button" className="btn-secondary" disabled={addingSatker} onClick={() => void addSatker()}>{addingSatker ? 'Menambahkan…' : 'Tambah satker'}</button></div>{catalogFeedback && <p role={catalogFeedback.error ? 'alert' : 'status'} className={`mt-2 text-sm ${catalogFeedback.error ? 'text-red-600' : 'text-emerald-700'}`}>{catalogFeedback.message}</p>}</div>}
       </section>
     </div>
   );

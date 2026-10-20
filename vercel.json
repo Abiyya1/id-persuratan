@@ -5,6 +5,10 @@
     {
       "path": "/api/cron/resync",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/resync?closeDay=1",
+      "schedule": "59 16 * * *"
     }
   ]
 }

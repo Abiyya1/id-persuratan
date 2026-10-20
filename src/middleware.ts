@@ -22,8 +22,6 @@ const PUBLIC_PATHS = new Set(['/', '/login', '/register']);
 /** Routes requiring admin or superadmin. */
 const ADMIN_PREFIXES = ['/admin'];
 
-/** Routes requiring superadmin. */
-const SUPERADMIN_PREFIXES = ['/api/superadmin'];
 
 function getSecret(): Uint8Array | null {
   const secret = process.env.SESSION_SECRET;
@@ -98,7 +96,7 @@ export async function middleware(req: NextRequest) {
   // ---- Protected routes -----------------------------------------------------
   if (!session) return redirectToLogin(req, '');
 
-  // "Your account is pending Superadmin approval."
+  // Pending registrations require an administrator's approval.
   // A rejected account gets its own message so the cause is unambiguous.
   if (session.status === 'pending') {
     return redirectToLogin(req, 'pending');
@@ -110,9 +108,6 @@ export async function middleware(req: NextRequest) {
   // ---- Role gates -----------------------------------------------------------
   const isAdmin = session.role === 'admin' || session.role === 'superadmin';
 
-  if (SUPERADMIN_PREFIXES.some((p) => pathname.startsWith(p)) && !isAdmin) {
-    return NextResponse.json({ error: 'Superadmin access required.' }, { status: 403 });
-  }
 
   // A plain `user` reaching /admin is not an auth failure -- they ARE signed
   // in. Send them to their own portal rather than to /login, which would look
@@ -121,8 +116,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', req.url));
   }
 
-  // Mirror image: admins and superadmins have no "My Documents" nav entry, so
-  // landing on /dashboard is a dead end. Point them at Management.
+  // Creation uses /dashboard for users and /admin for administrators.
   if (isAdmin && (pathname === '/dashboard' || pathname.startsWith('/dashboard/'))) {
     return NextResponse.redirect(new URL('/admin', req.url));
   }

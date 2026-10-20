@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { ROLE_LABELS } from './Badges';
 
 /**
  * Username + password editor.
@@ -38,7 +39,7 @@ export function ProfileForm({
 
     const clean = username.trim();
     if (clean === initialUsername) {
-      setUsernameMsg({ kind: 'error', text: 'That is already your username.' });
+      setUsernameMsg({ kind: 'error', text: 'Nama pengguna tersebut sudah Anda gunakan.' });
       return;
     }
 
@@ -53,12 +54,12 @@ export function ProfileForm({
       const data = await res.json();
       setUsernameMsg({
         kind: res.ok ? 'success' : 'error',
-        text: res.ok ? 'Username updated.' : (data.error ?? 'Could not update username.'),
+        text: res.ok ? 'Nama pengguna diperbarui.' : (data.error ?? 'Tidak dapat memperbarui nama pengguna.'),
       });
 
       if (res.ok) setUsername(clean);
     } catch {
-      setUsernameMsg({ kind: 'error', text: 'Could not reach the server.' });
+      setUsernameMsg({ kind: 'error', text: 'Tidak dapat menghubungi server.' });
     } finally {
       setSavingUsername(false);
     }
@@ -69,7 +70,7 @@ export function ProfileForm({
     setPasswordMsg(null);
 
     if (newPassword !== confirmPassword) {
-      setPasswordMsg({ kind: 'error', text: 'New passwords do not match.' });
+      setPasswordMsg({ kind: 'error', text: 'Konfirmasi kata sandi baru tidak cocok.' });
       return;
     }
 
@@ -86,17 +87,17 @@ export function ProfileForm({
       if (!res.ok) {
         setPasswordMsg({
           kind: 'error',
-          text: data.error ?? 'Could not change password.',
+          text: data.error ?? 'Tidak dapat mengganti kata sandi.',
         });
         return;
       }
 
-      setPasswordMsg({ kind: 'success', text: 'Password changed.' });
+      setPasswordMsg({ kind: 'success', text: 'Kata sandi diganti.' });
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch {
-      setPasswordMsg({ kind: 'error', text: 'Could not reach the server.' });
+      setPasswordMsg({ kind: 'error', text: 'Tidak dapat menghubungi server.' });
     } finally {
       setSavingPassword(false);
     }
@@ -106,22 +107,22 @@ export function ProfileForm({
     <div className="space-y-6">
       {/* ---- Identity ------------------------------------------------------ */}
       <section className="card p-6">
-        <h2 className="text-lg font-semibold text-navy-900">Account</h2>
+        <h2 className="text-lg font-semibold text-navy-900">Akun</h2>
         <dl className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
-            <dt className="text-sm text-slate-500">Username</dt>
+            <dt className="text-sm text-slate-500">Nama pengguna</dt>
             <dd className="mt-0.5 font-medium text-slate-900">{initialUsername}</dd>
           </div>
           <div>
-            <dt className="text-sm text-slate-500">Role</dt>
-            <dd className="mt-0.5 font-medium capitalize text-slate-900">{role}</dd>
+            <dt className="text-sm text-slate-500">Peran</dt>
+            <dd className="mt-0.5 font-medium text-slate-900">{ROLE_LABELS[role] ?? 'Peran tidak dikenal'}</dd>
           </div>
         </dl>
       </section>
 
       {/* ---- Username ------------------------------------------------------ */}
       <section className="card p-6">
-        <h2 className="text-lg font-semibold text-navy-900">Change username</h2>
+        <h2 className="text-lg font-semibold text-navy-900">Ganti nama pengguna</h2>
 
         {usernameMsg && (
           <p
@@ -139,7 +140,7 @@ export function ProfileForm({
         <form onSubmit={saveUsername} className="mt-4 space-y-4">
           <div>
             <label htmlFor="new-username" className="label">
-              New username
+              Nama pengguna baru
             </label>
             <input
               id="new-username"
@@ -149,7 +150,7 @@ export function ProfileForm({
               maxLength={50}
             />
             <p className="mt-1 text-xs text-slate-500">
-              3-50 characters. Letters, numbers, dot, underscore, hyphen.
+              3–50 karakter. Huruf, angka, titik, garis bawah, dan tanda hubung.
             </p>
           </div>
 
@@ -158,14 +159,14 @@ export function ProfileForm({
             disabled={savingUsername}
             className="btn-primary"
           >
-            {savingUsername ? 'Saving...' : 'Update username'}
+            {savingUsername ? 'Menyimpan...' : 'Perbarui nama pengguna'}
           </button>
         </form>
       </section>
 
       {/* ---- Password ------------------------------------------------------ */}
       <section className="card p-6">
-        <h2 className="text-lg font-semibold text-navy-900">Change password</h2>
+        <h2 className="text-lg font-semibold text-navy-900">Ganti kata sandi</h2>
 
         {passwordMsg && (
           <p
@@ -183,7 +184,7 @@ export function ProfileForm({
         <form onSubmit={savePassword} className="mt-4 space-y-4">
           <div>
             <label htmlFor="current-password" className="label">
-              Current password
+              Kata sandi saat ini
             </label>
             <input
               id="current-password"
@@ -199,7 +200,7 @@ export function ProfileForm({
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label htmlFor="new-password" className="label">
-                New password
+                Kata sandi baru
               </label>
               <input
                 id="new-password"
@@ -213,7 +214,7 @@ export function ProfileForm({
             </div>
             <div>
               <label htmlFor="confirm-password" className="label">
-                Confirm new password
+                Konfirmasi kata sandi baru
               </label>
               <input
                 id="confirm-password"
@@ -228,11 +229,11 @@ export function ProfileForm({
           </div>
 
           <p className="text-xs text-slate-500">
-            At least 8 characters, with a letter and a number.
+            Minimal 8 karakter, dengan huruf dan angka.
           </p>
 
           <button type="submit" disabled={savingPassword} className="btn-primary">
-            {savingPassword ? 'Changing...' : 'Change password'}
+            {savingPassword ? 'Mengganti...' : 'Ganti kata sandi'}
           </button>
         </form>
       </section>
