@@ -12,3 +12,7 @@ next-env.d.ts
 npm-debug.log*
 
 .superpowers/
+
+vercel.json
+.agents/
+anti-slop/
